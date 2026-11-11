@@ -1,4 +1,4 @@
-package com.daniel.wwrp2.feature.dilles.killheal;
+package com.daniel.wwrp2.feature.killheal;
 
 import com.daniel.wwrp2.Wwrp2;
 import net.minecraft.server.level.ServerPlayer;
@@ -8,6 +8,11 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+/**
+ * Recupera el 50 % de la vida máxima tras una baja válida de otro jugador.
+ *
+ * @author dilles
+ */
 @Mod.EventBusSubscriber(modid = Wwrp2.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class KillHealing {
     private static final float MAX_HEALTH_FRACTION = 0.5F;
