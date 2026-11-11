@@ -7,6 +7,7 @@
 ## Ramas
 
 - **Una funcionalidad por rama, una persona responsable.** La rama sale de `develop` y se llama `feature/<nombre>`, por ejemplo `feature/kill-heal`.
+- **Las ramas de feature solo existen en local: no se suben al remoto.** Al remoto solo se suben `develop` y `master`. Si GitHub propone abrir un pull request, se ignora.
 - **`develop`** recibe las features terminadas, aprobadas por el equipo y que compilan.
 - **`master`** solo recibe merges desde `develop` (mejor si van etiquetados con versión, p. ej. `v1.0.0`) y solo con versiones completas del proyecto. Si más adelante se añaden features o arreglos, se hace una versión nueva que sale de `develop`.
 
@@ -18,11 +19,15 @@ git pull
 git checkout -b feature/mi-feature
 ```
 
-Antes de pedir el merge a `develop`:
+Cuando la feature está terminada y aprobada, se mergea en local y solo se sube `develop`:
 
 ```bash
-./gradlew build
-git push -u origin feature/mi-feature
+git checkout develop
+git pull
+git merge --no-ff feature/mi-feature
+./gradlew build                      # develop tiene que compilar antes de subirlo
+git push origin develop
+git branch -d feature/mi-feature
 ```
 
 ## Estructura del código
@@ -55,7 +60,7 @@ src/main/java/com/daniel/wwrp2/
 5. **Código compartido** entre varias features va en `com.daniel.wwrp2.util`, no dentro de una feature.
 6. **Recursos compartidos** (por ejemplo `assets/wwrp2/lang/es_es.json`): las claves llevan el nombre de la feature, como `wwrp2.killheal.mensaje`, para no pisarse.
 
-## Antes de pedir el merge a `develop`
+## Antes de mergear en `develop`
 
 - [ ] `./gradlew build` termina bien.
 - [ ] Probado en el juego con `./gradlew runClient` (y `./gradlew runServer` si toca lógica de servidor).
