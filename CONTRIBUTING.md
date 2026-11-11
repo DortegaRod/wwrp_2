@@ -36,13 +36,16 @@ git branch -d feature/mi-feature
 src/main/java/com/wwrp2/
 ├── Wwrp2.java             punto de entrada del mod (no se toca por feature)
 └── feature/
-    └── killheal/          una feature = un paquete
+    └── <nombre>/          una feature = un paquete
         ├── ...            lógica común (servidor y cliente)
         └── client/        solo cliente: render, HUD, teclas...
 ```
 
 1. **Todo el código de una feature va en `com.wwrp2.feature.<nombre>`**, que es el nombre de la rama sin guiones: `feature/kill-heal` → `com.wwrp2.feature.killheal`. Una rama no toca los paquetes de otras features.
 2. **Lo que solo existe en el cliente** (renderizado, pantallas, HUD, teclas) va en el subpaquete `client/`. En un servidor dedicado esas clases de Minecraft no existen y lo harían fallar.
+   - Si la feature no tiene nada de cliente, no lleva `client/` (p. ej. `killheal`, que solo cura en el servidor).
+   - Si todo es de cliente, todo va en `client/` (p. ej. `ocultarnametag`, que solo cambia el render).
+   - Si tiene de las dos cosas, la lógica común va en la raíz de la feature y lo de cliente en `client/`.
 3. **Cada feature se registra sola**, sin tocar `Wwrp2.java`:
 
    ```java
