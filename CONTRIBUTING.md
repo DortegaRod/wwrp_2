@@ -1,5 +1,9 @@
 # Cómo trabajamos en wwrp-2
 
+## Requisitos
+
+- **JDK 17 instalado.** No hace falta que sea el Java por defecto: `gradle/gradle-daemon-jvm.properties` hace que Gradle lo busque y lo use aunque en el PATH haya otra versión (Gradle 8.8 no funciona con Java 23 o superior). Si no encuentra ninguno, el build falla avisando de que falta un JDK 17.
+
 ## Ramas
 
 - **Una funcionalidad por rama, una persona responsable.** La rama sale de `develop` y se llama `feature/<nombre>`, por ejemplo `feature/kill-heal`.
