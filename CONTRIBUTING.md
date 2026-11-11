@@ -3,6 +3,7 @@
 ## Requisitos
 
 - **JDK 17 instalado.** No hace falta que sea el Java por defecto: `gradle/gradle-daemon-jvm.properties` hace que Gradle lo busque y lo use aunque en el PATH haya otra versión (Gradle 8.8 no funciona con Java 23 o superior). Si no encuentra ninguno, el build falla avisando de que falta un JDK 17.
+- **Git con tu nombre.** Cada commit lleva el nombre de quien lo hace, y así se sabe quién ha hecho cada cosa. Configúralo una vez en el repo con `git config user.name "Tu nombre"` y `git config user.email "tu@correo"`, y comprueba con `git config user.name` que sale el tuyo.
 
 ## Ramas
 
@@ -34,11 +35,12 @@ git branch -d feature/mi-feature
 
 ```
 src/main/java/com/wwrp2/
-├── Wwrp2.java             punto de entrada del mod (no se toca por feature)
+├── Wwrp2.java                 punto de entrada del mod (no se toca por feature)
 └── feature/
-    └── <nombre>/          una feature = un paquete
-        ├── ...            lógica común (servidor y cliente)
-        └── client/        solo cliente: render, HUD, teclas...
+    └── <nombre>/              una feature = un paquete
+        ├── package-info.java  qué hace la feature y quién la lleva (@author)
+        ├── ...                lógica común (servidor y cliente)
+        └── client/            solo cliente: render, HUD, teclas...
 ```
 
 1. **Todo el código de una feature va en `com.wwrp2.feature.<nombre>`**, que es el nombre de la rama sin guiones: `feature/kill-heal` → `com.wwrp2.feature.killheal`. Una rama no toca los paquetes de otras features.
@@ -62,12 +64,18 @@ src/main/java/com/wwrp2/
 4. **Única excepción:** si la feature registra items, bloques, etc. con `DeferredRegister`, añade una sola línea en el constructor de `Wwrp2`, en el sitio marcado (`MiFeatureRegistry.register(modEventBus);`).
 5. **Código compartido** entre varias features va en `com.wwrp2.util`, no dentro de una feature.
 6. **Recursos compartidos** (por ejemplo `assets/wwrp2/lang/es_es.json`): las claves llevan el nombre de la feature, como `wwrp2.killheal.mensaje`, para no pisarse.
+7. **Quién hace qué.** Cada feature tiene un `package-info.java` en su paquete con una línea de qué hace y `@author <responsable>` (mira el de `killheal` o el de `ocultarnametag`). Las clases no llevan `@author`. El detalle de quién ha cambiado cada cosa está en git, por eso los commits van siempre con tu nombre y nunca con el de la IA:
+   - `git log --author=<nombre>`: los commits de una persona.
+   - `git blame <archivo>`: quién escribió cada línea.
+   - `git shortlog -sn`: cuántos commits tiene cada uno.
 
 ## Antes de mergear en `develop`
 
 - [ ] `./gradlew build` termina bien.
 - [ ] Probado en el juego con `./gradlew runClient` (y `./gradlew runServer` si toca lógica de servidor).
 - [ ] Solo cambia su paquete, sus recursos y, si hace falta, su línea en `Wwrp2.java`.
+- [ ] La feature tiene su `package-info.java` con `@author`.
+- [ ] Todos los commits de la rama salen con tu nombre (desde la rama: `git log develop.. --format="%an %s"`).
 
 ## Trabajar con IA
 
@@ -77,15 +85,15 @@ Todos programamos con IA. Al empezar cada conversación con la IA, pega este pro
 Vas a ayudarme a programar wwrp-2, un mod de Minecraft Forge para 1.20.1 (Forge 47, mappings oficiales de Mojang, Java 17). Antes de nada, lee CONTRIBUTING.md: son las normas del equipo y tienes que seguirlas siempre.
 
 Antes de empezar:
-1. Pregúntame mi nombre y el nombre de la feature. No te los inventes y no empieces hasta que te conteste.
+1. Pregúntame mi nombre y el nombre de la feature. No te los inventes y no empieces hasta que te conteste. Después comprueba con `git config user.name` que git tiene mi nombre; si no, dímelo y no hagas ningún commit hasta que lo configure.
 2. Crea la rama local desde develop: `git checkout develop`, `git pull`, `git checkout -b feature/<nombre-de-la-feature>`. Si ya existe una rama para esa feature, pregúntame si seguimos en ella.
-3. El código va en `com.wwrp2.feature.<nombre sin guiones>`, y lo que solo existe en el cliente, en su subpaquete `client`. Pon mi nombre con `@author` en las clases nuevas.
+3. El código va en `com.wwrp2.feature.<nombre sin guiones>`, y lo que solo existe en el cliente, en su subpaquete `client`. Crea en el paquete de la feature un `package-info.java` con una línea de qué hace y `@author <mi nombre>`; las clases no llevan `@author`.
 
 Mientras desarrollas:
 - Usa solo APIs de Forge 47 y Minecraft 1.20.1. Nada de NeoForge ni de otras versiones; si dudas de una firma, compila para comprobarla.
 - Toca solo el paquete y los recursos de esta feature. Si necesitas cambiar algo compartido (`Wwrp2.java`, `build.gradle`, `gradle.properties`, `mods.toml`, `util` o código de otra feature), dime qué y por qué, y espera a que te diga que sí.
 - No añadas dependencias sin preguntarme.
-- Comentarios y mensajes de commit en español. Los commits van en la rama de la feature, nunca directamente en develop ni en master.
+- Comentarios y mensajes de commit en español. Los commits van en la rama de la feature, nunca directamente en develop ni en master, y siempre con mi nombre de git: no cambies el autor ni pongas el tuyo.
 - Comprueba con `./gradlew build` que compila.
 
 Al terminar:

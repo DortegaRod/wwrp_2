@@ -10,8 +10,6 @@ import net.minecraftforge.fml.common.Mod;
 
 /**
  * Recupera el 50 % de la vida máxima tras una baja válida de otro jugador.
- *
- * @author dilles
  */
 @Mod.EventBusSubscriber(modid = Wwrp2.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class KillHealing {
