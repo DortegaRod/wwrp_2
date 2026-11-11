@@ -1,4 +1,4 @@
-package com.daniel.warp;
+package com.daniel.wwrp2;
 
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -8,15 +8,15 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 
 /**
- * Punto de entrada del mod. Las features viven en {@code com.daniel.warp.feature} y se
+ * Punto de entrada del mod. Las features viven en {@code com.daniel.wwrp2.feature} y se
  * registran solas, así que aquí no va lógica de ninguna feature (ver CONTRIBUTING.md).
  */
-@Mod(Warp.MOD_ID)
-public class Warp {
-    public static final String MOD_ID = "warp";
+@Mod(Wwrp2.MOD_ID)
+public class Wwrp2 {
+    public static final String MOD_ID = "wwrp2";
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public Warp(FMLJavaModLoadingContext context) {
+    public Wwrp2(FMLJavaModLoadingContext context) {
         IEventBus modEventBus = context.getModEventBus();
         modEventBus.addListener(this::commonSetup);
 
@@ -25,6 +25,6 @@ public class Warp {
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-        LOGGER.info("Warp cargado");
+        LOGGER.info("wwrp-2 cargado");
     }
 }
