@@ -1,0 +1,72 @@
+package com.wwrp2.feature.replay;
+
+import com.mojang.logging.LogUtils;
+import net.minecraft.server.level.ServerPlayer;
+import org.slf4j.Logger;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Collection;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/** Lleva la cuenta de qué jugadores se están grabando ahora mismo. */
+public final class ReplayManager {
+    private static final Logger LOGGER = LogUtils.getLogger();
+    private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+    private static final Map<UUID, ReplayRecorder> RECORDERS = new ConcurrentHashMap<>();
+
+    private ReplayManager() {
+    }
+
+    /** Empieza a grabar al jugador. Devuelve {@code null} si ya se estaba grabando o si falla. */
+    public static ReplayRecorder start(ServerPlayer player) {
+        if (RECORDERS.containsKey(player.getUUID())) {
+            return null;
+        }
+        Path dir = player.server.getServerDirectory().toPath().resolve("replays");
+        String name = player.getGameProfile().getName() + "_" + LocalDateTime.now().format(STAMP);
+        ReplayRecorder recorder;
+        try {
+            recorder = new ReplayRecorder(player, dir, name);
+        } catch (IOException e) {
+            LOGGER.error("No se pudo crear el archivo del replay de {}", player.getGameProfile().getName(), e);
+            return null;
+        }
+        try {
+            recorder.start();
+        } catch (RuntimeException e) {
+            LOGGER.error("No se pudo empezar el replay de {}: {}", player.getGameProfile().getName(), e.getMessage());
+            recorder.discard();
+            return null;
+        }
+        RECORDERS.put(player.getUUID(), recorder);
+        return recorder;
+    }
+
+    /** Para la grabación del jugador. Devuelve {@code null} si no se estaba grabando. */
+    public static ReplayRecorder stop(UUID player) {
+        ReplayRecorder recorder = RECORDERS.remove(player);
+        if (recorder != null) {
+            recorder.stop();
+        }
+        return recorder;
+    }
+
+    public static ReplayRecorder get(UUID player) {
+        return RECORDERS.get(player);
+    }
+
+    public static Collection<ReplayRecorder> all() {
+        return RECORDERS.values();
+    }
+
+    public static void stopAll() {
+        for (UUID id : RECORDERS.keySet()) {
+            stop(id);
+        }
+    }
+}

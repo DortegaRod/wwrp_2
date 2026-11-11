@@ -1,0 +1,118 @@
+# Feature `replay`
+
+Responsable: **Mistic** · Rama: `feature/replay` · Paquete: `com.wwrp2.feature.replay`
+
+## Qué es
+
+Grabar las partidas en el **servidor** como replay, para ver highlights después. No se graba
+vídeo: se guarda el flujo de paquetes (posiciones, chunks, entidades, bloques, sonidos, chat) en
+un archivo `.mcpr` que se abre con **Replay Mod**. Desde ahí se puede ver la partida con cualquier
+cámara: POV de cualquier jugador, cámara libre, travellings y exportación a vídeo.
+
+## Decisiones tomadas
+
+| Tema | Decisión | Por qué |
+|---|---|---|
+| Qué se graba | Datos (paquetes), no vídeo | Coste casi nulo en directo y cualquier ángulo al revisar |
+| Dónde se graba | Servidor, un único grabador | Sin instalar nada en los clientes para grabar |
+| Visor | Replay Mod (en Forge 1.20.1: **ReForgedPlay**, port de la comunidad; el original es Fabric) | Ya trae línea de tiempo, keyframes y exportación. Visor propio solo si resulta inviable en 1.20.1 Forge |
+| Formato | `.mcpr` | Es lo que lee Replay Mod |
+| Escala | Menos de 20 jugadores | Estimación del equipo (~98 % seguro) |
+| Marcadores | Automáticos, y el admin puede añadir, editar y borrar | Petición del equipo |
+| Dependencias | Ninguna nueva | Replay Mod solo hace falta para reproducir, no para grabar |
+
+### Visor: ReForgedPlay (decidido)
+
+Se ve el replay con **ReForgedPlay** dentro del propio modpack Forge, para que también se vea el
+contenido modded. Solo lo necesita quien revise o edite replays; grabar lo hace el servidor.
+Descartados: Replay Mod original en una instancia Fabric (no ve el contenido modded) y Sinytra
+Connector + Replay Mod original (beta, sin confirmación de que funcione). Plan B si ReForgedPlay
+falla con Forge 47: Replay Mod original en Fabric para contenido vanilla.
+
+## Hallazgos de la investigación (Forge 47 / 1.20.1)
+
+- **Sin Mixin ni cambios en `build.gradle`.** El pipeline de Netty de cada jugador es
+  `splitter, decoder, prepender, encoder, unbundler, bundler, packet_handler`. Un handler de
+  salida colocado con `pipeline.addBefore("encoder", ...)` recibe cada paquete **ya codificado**
+  (id + datos), que es justo lo que guarda el `.mcpr`. Los bundles ya vienen separados.
+- **Formato `.mcpr`** (zip): `recording.tmcpr` (por paquete: int tiempo en ms, int longitud,
+  bytes), `metaData.json` (singleplayer, serverName, duration, date, mcversion, fileFormat,
+  fileFormatVersion, protocol, generator, selfId, players) y `markers.json`: array de
+  `{realTimestamp, value:{name, position:{x,y,z,yaw,pitch,roll}}}`.
+- **Problema real: el estado inicial.** Al empezar a grabar con los jugadores ya conectados hay
+  que fabricar a mano los paquetes de «acabo de entrar» (login, jugadores, posición, chunks,
+  entidades, inventario...). Es la parte más trabajosa.
+- **Referencia:** ServerReplay (senseiwells, MIT, Fabric) hace lo mismo; sirve de guía de diseño,
+  no se puede usar tal cual porque es Fabric.
+
+## Plan por fases
+
+1. **Grabador de servidor**: engancha el canal de red de cada jugador y vuelca los paquetes con
+   su marca de tiempo a un `.mcpr`. Punto delicado: el estado inicial (chunks y entidades ya
+   cargadas) para que el replay arranque bien.
+2. **Marcadores automáticos**: kills, muertes, explosiones y lo que definamos desde la lógica de
+   las partidas.
+3. **Comandos de admin**: listar, añadir, editar y borrar marcadores, guardados en el propio
+   archivo del replay.
+4. **Pruebas** con `runServer` y varios clientes, abriendo el resultado en Replay Mod.
+
+## Estado
+
+- [x] **Paso 1: grabador básico (probado en servidor dedicado el 2026-11-11).**
+  - `ReplayRecorder`: handler de Netty tras el `encoder`, escritura en hilo aparte y empaquetado a
+    `.mcpr` con `recording.tmcpr`, `metaData.json` y `markers.json`.
+  - `ReplayManager` y comandos `/replay start|stop [jugador]` y `/replay list` (permiso 2). La
+    grabación se para sola si el jugador se desconecta o el servidor se apaga.
+  - Los archivos salen en `<carpeta del servidor>/replays/<jugador>_<fecha>.mcpr`.
+  - Verificado leyendo el archivo entero: 17.166 paquetes en 43,5 s, todos legibles, tiempos
+    crecientes, primer paquete Login Success (`0x02`), metadatos con versión 1.20.1 y protocolo 763.
+  - **Limitación:** falta el estado inicial. El análisis da 0 paquetes Join Game, 0 de posición
+    inicial y solo los chunks cargados después de empezar. Sin eso, ReForgedPlay no podrá abrirlo.
+- [ ] **Paso 2: estado inicial** (Join Game, jugadores, posición, chunks, entidades, inventario,
+  hora y clima al empezar a grabar).
+- [ ] **Paso 3: marcadores** automáticos y comandos de admin para añadir, editar y borrar.
+- [ ] **Paso 4: pruebas** con varios jugadores y con ReForgedPlay.
+
+## Cómo probar
+
+- **Solo en servidor dedicado** (`./gradlew runServer`), como en el evento. El anfitrión de un mundo
+  singleplayer/LAN no se puede grabar (su conexión es local y no codifica paquetes).
+- Primera vez: `eula=true` en `run/eula.txt` y `online-mode=false` en `run/server.properties` (el
+  cliente de desarrollo entra como `Dev`, sin cuenta).
+- La consola de `runServer` lanzada por Gradle **no acepta comandos**. Para dar op, añade el
+  jugador a `run/ops.json` con el servidor parado (UUID offline de `Dev`:
+  `380df991-f603-344c-a090-369bad2a924a`), o lanza el servidor desde IntelliJ
+  (`./gradlew genIntellijRuns`), donde la consola sí funciona.
+- Cliente: `./gradlew runClient` → Multijugador → `localhost`.
+
+## Cómo ver un replay (pendiente de probar)
+
+- **ReForgedPlay 0.3.2** (ferriarnus, Forge 1.20.1), por CurseForge. El repositorio
+  (`github.com/ferriarnus/ReForgedPlay`, rama `1.20.1`) no publica descargas.
+- **No en `runClient`:** el entorno de desarrollo usa otros nombres de código y los mods publicados
+  suelen romperse ahí. Usar una instancia normal (launcher de CurseForge o Prism) con 1.20.1 +
+  Forge 47.x + ReForgedPlay. Nuestro mod no hace falta para ver.
+- Copiar el `.mcpr` a `replay_recordings/` de esa instancia y abrirlo con **Replay Viewer** en el
+  menú principal.
+
+## Acciones futuras
+
+- [x] ~~Investigar cómo acceder al pipeline de red por jugador en Forge 47.~~ Hecho (ver hallazgos).
+- [x] ~~Diseñar el esqueleto del grabador.~~ Hecho en el paso 1.
+- [ ] Paso 2: estado inicial.
+- [ ] Probar el `.mcpr` en ReForgedPlay y comprobar que muestra los marcadores de `markers.json`.
+- [ ] Decidir qué eventos de partida cuentan como highlight y su prioridad.
+- [ ] Definir la sintaxis de los comandos de admin para marcadores y sus permisos.
+- [ ] ¿Grabar a todos automáticamente al empezar una ronda? Valorar integrarlo con la feature `rondas`.
+- [ ] Probar con ~20 jugadores: tamaño de archivo, carga del servidor y disco.
+- [ ] Política de almacenamiento: dónde se guardan los replays y cuándo se borran los viejos.
+- [ ] Si ReForgedPlay no sirve: plan B Replay Mod original en Fabric (solo contenido vanilla).
+
+## Errores antiguos corregidos
+
+Cada fallo encontrado y corregido, con qué pasaba y cómo se arregló.
+
+| Fecha | Qué fallaba | Cómo se corrigió |
+|---|---|---|
+| 2026-11-11 | `/replay start` daba «unexpected error» al probar en un mundo abierto a LAN. El anfitrión de singleplayer/LAN usa una conexión local en memoria, sin `encoder` en el pipeline, y `addBefore("encoder", …)` lanzaba excepción. | `start()` comprueba que existe `encoder` y, si no, falla con un mensaje claro. Para probar hay que usar servidor dedicado (`runServer`), como en el evento. |
+| 2026-11-11 | Si `start()` fallaba, el grabador quedaba registrado y al cerrar se guardaba un `.mcpr` vacío. | El grabador solo se registra si arranca bien; si no, `discard()` cierra y borra el temporal. |
