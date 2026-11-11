@@ -1,6 +1,6 @@
-package com.daniel.wwrp2.feature.ocultarnametag.client;
+package com.wwrp2.feature.ocultarnametag.client;
 
-import com.daniel.wwrp2.Wwrp2;
+import com.wwrp2.Wwrp2;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
