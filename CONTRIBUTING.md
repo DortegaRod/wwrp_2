@@ -68,6 +68,7 @@ src/main/java/com/wwrp2/
    - `git log --author=<nombre>`: los commits de una persona.
    - `git blame <archivo>`: quién escribió cada línea.
    - `git shortlog -sn`: cuántos commits tiene cada uno.
+   - Si alguien aparece con varios nombres o correos (o con el de la IA), se añade una línea en `.mailmap` para unificarlos.
 
 ## Antes de mergear en `develop`
 

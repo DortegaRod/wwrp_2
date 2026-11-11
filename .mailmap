@@ -1,0 +1,4 @@
+# Une las distintas identidades de cada persona en git log, git blame y git shortlog.
+# Formato: Nombre bueno <correo bueno> <correo con el que se hizo el commit>
+Daniel <daniel.ortega.rod@gmail.com> <da.ortega@alumnos.upm.es>
+dilles <codex@localhost>
