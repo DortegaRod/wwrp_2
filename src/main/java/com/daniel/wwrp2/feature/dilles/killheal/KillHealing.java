@@ -1,4 +1,4 @@
-package com.daniel.wwrp2.feature.killheal;
+package com.daniel.wwrp2.feature.dilles.killheal;
 
 import com.daniel.wwrp2.Wwrp2;
 import net.minecraft.server.level.ServerPlayer;
