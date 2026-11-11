@@ -3,9 +3,10 @@
  *
  * <pre>
  * feature/
- * └── nombrefeature/      una feature = un paquete = una rama feature/nombre-feature
- *     ├── ...             lógica común (servidor y cliente)
- *     └── client/         solo cliente: render, HUD, teclas...
+ * └── nombrefeature/          una feature = un paquete = una rama feature/nombre-feature
+ *     ├── package-info.java   qué hace la feature y quién la lleva (@author)
+ *     ├── ...                 lógica común (servidor y cliente)
+ *     └── client/             solo cliente: render, HUD, teclas...
  * </pre>
  *
  * <p>Cada feature se registra sola con {@code @Mod.EventBusSubscriber}, así que normalmente
