@@ -1,6 +1,6 @@
-package com.daniel.wwrp2.feature.killheal;
+package com.wwrp2.feature.killheal;
 
-import com.daniel.wwrp2.Wwrp2;
+import com.wwrp2.Wwrp2;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
