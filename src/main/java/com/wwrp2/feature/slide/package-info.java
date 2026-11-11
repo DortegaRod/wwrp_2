@@ -1,7 +1,8 @@
 /**
- * Deslizamiento al estilo Black Ops 3: al agacharse mientras se esprinta, el jugador se lanza
- * por el suelo con un impulso que se va frenando, puede girar un poco, disparar, y cortar el
- * deslizamiento con un salto para llevarse parte de la velocidad.
+ * Deslizamiento al estilo Black Ops 3: al pulsar la tecla de deslizarse (C por defecto)
+ * mientras se esprinta, el jugador se lanza por el suelo con un impulso que se va frenando,
+ * puede girar un poco, disparar, y cortar el deslizamiento con un salto para llevarse parte
+ * de la velocidad.
  *
  * <p>El movimiento lo calcula el cliente del propio jugador (como todo el movimiento en
  * Minecraft) en {@link com.wwrp2.feature.slide.client.SlideController}. El cliente avisa al

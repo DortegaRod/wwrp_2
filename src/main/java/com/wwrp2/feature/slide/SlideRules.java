@@ -31,7 +31,7 @@ public final class SlideRules {
     public static final float TURN_DEGREES_PER_TICK = 4.5F;
     /** Ticks seguidos en el aire (al salir por un borde) antes de dar el deslizamiento por terminado. */
     public static final int MAX_AIR_TICKS = 6;
-    /** Ticks que se recuerda un agacharse pulsado en el aire, para deslizarse al aterrizar. */
+    /** Ticks que se recuerda la tecla de deslizarse pulsada en el aire, para deslizarse al aterrizar. */
     public static final int LANDING_BUFFER_TICKS = 8;
     /** Velocidad máxima que se conserva al cortar el deslizamiento con un salto. */
     public static final double JUMP_CARRY_MAX_SPEED = 0.40;

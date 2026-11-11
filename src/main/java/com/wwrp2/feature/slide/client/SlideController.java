@@ -25,11 +25,12 @@ import javax.annotation.Nullable;
  * teclas y antes de que Minecraft lo mueva, así que la velocidad que se pone aquí es
  * exactamente la que se recorre ese tick.
  *
- * <p>Cómo se juega: agacharse mientras se esprinta empieza el deslizamiento (pulsado en el aire,
- * empieza al aterrizar). Con W pulsada gira poco a poco hacia donde se mira; sin tocar nada
- * sigue recto y se puede mirar y disparar a los lados. Saltar lo corta conservando parte de la
- * velocidad; pulsar S o volver a pulsar agacharse lo frena. Si al terminar se sigue pulsando
- * agacharse, el jugador se queda agachado; si no, se levanta y vuelve a esprintar.</p>
+ * <p>Cómo se juega: pulsar la tecla de deslizarse ({@link SlideKeyBindings#SLIDE}, la C si no
+ * se cambia) mientras se esprinta empieza el deslizamiento; pulsada en el aire, empieza al
+ * aterrizar. Con W pulsada gira poco a poco hacia donde se mira; sin tocar nada sigue recto y
+ * se puede mirar y disparar a los lados. Saltar lo corta conservando parte de la velocidad;
+ * pulsar S o volver a pulsar la tecla lo frena. Si al terminar se está pulsando agacharse, el
+ * jugador se queda agachado; si no, se levanta y vuelve a esprintar.</p>
  */
 @Mod.EventBusSubscriber(modid = Wwrp2.MOD_ID, value = Dist.CLIENT)
 public final class SlideController {
@@ -46,7 +47,7 @@ public final class SlideController {
      * otra entidad o un daño sin retroceso se quedan por debajo de 0,13.
      */
     private static final double EXTERNAL_IMPULSE_SQR = 0.15;
-    /** Ticks mínimos de deslizamiento antes de que volver a pulsar agacharse lo frene. */
+    /** Ticks mínimos de deslizamiento antes de que volver a pulsar la tecla lo frene. */
     private static final int MIN_TICKS_TO_BRAKE = 3;
     /** Cuánto se abre el campo de visión al empezar; compensa el que se pierde al dejar de esprintar. */
     private static final float FOV_KICK = 0.16F;
@@ -69,7 +70,7 @@ public final class SlideController {
     private static int cooldown;
     private static int landingBuffer;
     private static boolean armedInAir;
-    private static boolean wasShiftDown;
+    private static boolean wasSlideKeyDown;
 
     private static boolean hasLastPosition;
     private static double lastX;
@@ -104,8 +105,9 @@ public final class SlideController {
         Input input = event.getInput();
 
         boolean shiftDown = input.shiftKeyDown;
-        boolean shiftPressed = shiftDown && !wasShiftDown;
-        wasShiftDown = shiftDown;
+        boolean slideKeyDown = SlideKeyBindings.SLIDE.isDown();
+        boolean slideKeyPressed = slideKeyDown && !wasSlideKeyDown;
+        wasSlideKeyDown = slideKeyDown;
 
         // Lo que se ha movido en el último tick. La velocidad guardada de la entidad no sirve:
         // en el suelo ya lleva aplicado el rozamiento y es casi la mitad de lo que se recorre.
@@ -116,7 +118,7 @@ public final class SlideController {
         hasLastPosition = true;
 
         if (sliding) {
-            tickSlide(player, input, shiftDown, shiftPressed);
+            tickSlide(player, input, shiftDown, slideKeyPressed);
             return;
         }
 
@@ -129,13 +131,13 @@ public final class SlideController {
         }
 
         boolean onGround = player.onGround();
-        if (shiftPressed && !onGround) {
+        if (slideKeyPressed && !onGround) {
             landingBuffer = SlideRules.LANDING_BUFFER_TICKS;
             armedInAir = true;
         }
         // En el aire el deslizamiento queda pendiente: vale si se aterriza enseguida o si se
-        // llega al suelo con agacharse todavía pulsado.
-        boolean wantsSlide = onGround && (shiftPressed || landingBuffer > 0 || (armedInAir && shiftDown));
+        // llega al suelo con la tecla todavía pulsada.
+        boolean wantsSlide = onGround && (slideKeyPressed || landingBuffer > 0 || (armedInAir && slideKeyDown));
         if (onGround) {
             landingBuffer = 0;
             armedInAir = false;
@@ -181,7 +183,7 @@ public final class SlideController {
         tickSlide(player, input, false, false);
     }
 
-    private static void tickSlide(LocalPlayer player, Input input, boolean shiftDown, boolean shiftPressed) {
+    private static void tickSlide(LocalPlayer player, Input input, boolean shiftDown, boolean slideKeyPressed) {
         if (!SlideRules.canSlide(player)) {
             end(player, true);
             return;
@@ -194,7 +196,7 @@ public final class SlideController {
         }
         // Contra una pared, o frenando a propósito: se para con el rozamiento normal.
         boolean hitWall = player.horizontalCollision && !player.minorHorizontalCollision;
-        boolean brake = input.down || (shiftPressed && ticks >= MIN_TICKS_TO_BRAKE);
+        boolean brake = input.down || (slideKeyPressed && ticks >= MIN_TICKS_TO_BRAKE);
         if (hitWall || brake) {
             end(player, true);
             return;
@@ -298,7 +300,7 @@ public final class SlideController {
         cooldown = 0;
         landingBuffer = 0;
         armedInAir = false;
-        wasShiftDown = false;
+        wasSlideKeyDown = false;
         hasLastPosition = false;
         expectedVelocity = null;
     }
