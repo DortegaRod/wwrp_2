@@ -25,12 +25,15 @@ import javax.annotation.Nullable;
  * teclas y antes de que Minecraft lo mueva, así que la velocidad que se pone aquí es
  * exactamente la que se recorre ese tick.
  *
- * <p>Cómo se juega: pulsar la tecla de deslizarse ({@link SlideKeyBindings#SLIDE}, la C si no
- * se cambia) mientras se esprinta empieza el deslizamiento; pulsada en el aire, empieza al
- * aterrizar. Con W pulsada gira poco a poco hacia donde se mira; sin tocar nada sigue recto y
- * se puede mirar y disparar a los lados. Saltar lo corta conservando parte de la velocidad;
- * pulsar S o volver a pulsar la tecla lo frena. Si al terminar se está pulsando agacharse, el
- * jugador se queda agachado; si no, se levanta y vuelve a esprintar.</p>
+ * <p>Cómo se juega: agacharse mientras se esprinta empieza el deslizamiento; si se hace en el
+ * aire, empieza al aterrizar. Con W pulsada gira poco a poco hacia donde se mira; sin tocar
+ * nada sigue recto y se puede mirar y disparar a los lados. Saltar lo corta conservando parte
+ * de la velocidad; pulsar S o volver a agacharse lo frena. Si al terminar se sigue agachando,
+ * el jugador se queda agachado; si no, se levanta y vuelve a esprintar.</p>
+ *
+ * <p>Lo que se mira es la acción de agacharse, no una tecla: {@link Input#shiftKeyDown} es el
+ * control «Agacharse» de Minecraft, esté en la tecla que esté y con la opción de alternar
+ * agachado incluida.</p>
  */
 @Mod.EventBusSubscriber(modid = Wwrp2.MOD_ID, value = Dist.CLIENT)
 public final class SlideController {
@@ -47,7 +50,7 @@ public final class SlideController {
      * otra entidad o un daño sin retroceso se quedan por debajo de 0,13.
      */
     private static final double EXTERNAL_IMPULSE_SQR = 0.15;
-    /** Ticks mínimos de deslizamiento antes de que volver a pulsar la tecla lo frene. */
+    /** Ticks mínimos de deslizamiento antes de que volver a agacharse lo frene. */
     private static final int MIN_TICKS_TO_BRAKE = 3;
     /** Cuánto se abre el campo de visión al empezar; compensa el que se pierde al dejar de esprintar. */
     private static final float FOV_KICK = 0.16F;
@@ -70,7 +73,7 @@ public final class SlideController {
     private static int cooldown;
     private static int landingBuffer;
     private static boolean armedInAir;
-    private static boolean wasSlideKeyDown;
+    private static boolean wasCrouchDown;
 
     private static boolean hasLastPosition;
     private static double lastX;
@@ -104,10 +107,10 @@ public final class SlideController {
         }
         Input input = event.getInput();
 
-        boolean shiftDown = input.shiftKeyDown;
-        boolean slideKeyDown = SlideKeyBindings.SLIDE.isDown();
-        boolean slideKeyPressed = slideKeyDown && !wasSlideKeyDown;
-        wasSlideKeyDown = slideKeyDown;
+        // Se lee antes de que tickSlide lo apague, para saber qué quiere hacer el jugador de verdad.
+        boolean crouchDown = input.shiftKeyDown;
+        boolean crouchPressed = crouchDown && !wasCrouchDown;
+        wasCrouchDown = crouchDown;
 
         // Lo que se ha movido en el último tick. La velocidad guardada de la entidad no sirve:
         // en el suelo ya lleva aplicado el rozamiento y es casi la mitad de lo que se recorre.
@@ -118,7 +121,7 @@ public final class SlideController {
         hasLastPosition = true;
 
         if (sliding) {
-            tickSlide(player, input, shiftDown, slideKeyPressed);
+            tickSlide(player, input, crouchDown, crouchPressed);
             return;
         }
 
@@ -131,13 +134,13 @@ public final class SlideController {
         }
 
         boolean onGround = player.onGround();
-        if (slideKeyPressed && !onGround) {
+        if (crouchPressed && !onGround) {
             landingBuffer = SlideRules.LANDING_BUFFER_TICKS;
             armedInAir = true;
         }
         // En el aire el deslizamiento queda pendiente: vale si se aterriza enseguida o si se
-        // llega al suelo con la tecla todavía pulsada.
-        boolean wantsSlide = onGround && (slideKeyPressed || landingBuffer > 0 || (armedInAir && slideKeyDown));
+        // llega al suelo todavía agachándose.
+        boolean wantsSlide = onGround && (crouchPressed || landingBuffer > 0 || (armedInAir && crouchDown));
         if (onGround) {
             landingBuffer = 0;
             armedInAir = false;
@@ -183,7 +186,7 @@ public final class SlideController {
         tickSlide(player, input, false, false);
     }
 
-    private static void tickSlide(LocalPlayer player, Input input, boolean shiftDown, boolean slideKeyPressed) {
+    private static void tickSlide(LocalPlayer player, Input input, boolean crouchDown, boolean crouchPressed) {
         if (!SlideRules.canSlide(player)) {
             end(player, true);
             return;
@@ -196,7 +199,7 @@ public final class SlideController {
         }
         // Contra una pared, o frenando a propósito: se para con el rozamiento normal.
         boolean hitWall = player.horizontalCollision && !player.minorHorizontalCollision;
-        boolean brake = input.down || (slideKeyPressed && ticks >= MIN_TICKS_TO_BRAKE);
+        boolean brake = input.down || (crouchPressed && ticks >= MIN_TICKS_TO_BRAKE);
         if (hitWall || brake) {
             end(player, true);
             return;
@@ -220,14 +223,14 @@ public final class SlideController {
             // No se tocan las teclas: Minecraft salta en este mismo tick con la velocidad que se deja aquí.
             setHorizontalSpeed(player, Math.min(speed, SlideRules.JUMP_CARRY_MAX_SPEED));
             end(player, true);
-            resumeSprint(player, input, shiftDown);
+            resumeSprint(player, input, crouchDown);
             return;
         }
         if (ticks >= durationTicks) {
             // No se pone velocidad: la que queda del tick anterior ya lleva el rozamiento del
             // suelo, y desde ella Minecraft acelera o frena sin tirones según las teclas.
             end(player, true);
-            resumeSprint(player, input, shiftDown);
+            resumeSprint(player, input, crouchDown);
             return;
         }
 
@@ -267,9 +270,9 @@ public final class SlideController {
     }
 
     /** Como en BO3, si se sigue empujando hacia delante se sale del deslizamiento corriendo. */
-    private static void resumeSprint(LocalPlayer player, Input input, boolean shiftDown) {
+    private static void resumeSprint(LocalPlayer player, Input input, boolean crouchDown) {
         boolean enoughFood = player.getFoodData().getFoodLevel() > MIN_FOOD_TO_SPRINT || player.getAbilities().mayfly;
-        if (input.up && !shiftDown && enoughFood) {
+        if (input.up && !crouchDown && enoughFood) {
             player.setSprinting(true);
         }
     }
@@ -300,7 +303,7 @@ public final class SlideController {
         cooldown = 0;
         landingBuffer = 0;
         armedInAir = false;
-        wasSlideKeyDown = false;
+        wasCrouchDown = false;
         hasLastPosition = false;
         expectedVelocity = null;
     }
