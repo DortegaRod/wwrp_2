@@ -9,7 +9,7 @@
  * </pre>
  *
  * <p>Cada feature se registra sola con {@code @Mod.EventBusSubscriber}, así que normalmente
- * no hace falta tocar {@link com.daniel.warp.Warp}. Las normas completas están en
+ * no hace falta tocar {@link com.daniel.wwrp2.Wwrp2}. Las normas completas están en
  * {@code CONTRIBUTING.md}, en la raíz del repo.</p>
  */
-package com.daniel.warp.feature;
+package com.daniel.wwrp2.feature;
