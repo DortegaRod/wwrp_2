@@ -1,4 +1,4 @@
-package com.daniel.wwrp2;
+package com.wwrp2;
 
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -8,7 +8,7 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 
 /**
- * Punto de entrada del mod. Las features viven en {@code com.daniel.wwrp2.feature} y se
+ * Punto de entrada del mod. Las features viven en {@code com.wwrp2.feature} y se
  * registran solas, así que aquí no va lógica de ninguna feature (ver CONTRIBUTING.md).
  */
 @Mod(Wwrp2.MOD_ID)
