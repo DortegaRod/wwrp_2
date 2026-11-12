@@ -56,14 +56,18 @@ falla con Forge 47: Replay Mod original en Fabric para contenido vanilla.
 
 ## Plan por fases
 
-1. **Grabador de servidor**: engancha el canal de red de cada jugador y vuelca los paquetes con
-   su marca de tiempo a un `.mcpr`. Punto delicado: el estado inicial (chunks y entidades ya
-   cargadas) para que el replay arranque bien.
-2. **Marcadores automáticos**: kills, muertes, explosiones y lo que definamos desde la lógica de
-   las partidas.
-3. **Comandos de admin**: listar, añadir, editar y borrar marcadores, guardados en el propio
-   archivo del replay.
-4. **Pruebas** con `runServer` y varios clientes, abriendo el resultado en Replay Mod.
+Ver [`PLAN.md`](PLAN.md): fase 0 grabador base, 1 grabador de zona, 2 rondas, 3 marcadores,
+4 visor en el servidor, 5 escala.
+
+## Comandos (permiso 2)
+
+| Comando | Qué hace |
+|---|---|
+| `/replay zona` | Muestra la zona guardada |
+| `/replay zona <x1 z1> <x2 z2>` | Define la zona (dos esquinas, máximo 64 chunks por lado) |
+| `/replay start` / `/replay stop` | Graba la zona / para y guarda en `replays/zona_<fecha>.mcpr` |
+| `/replay estado` | Qué se está grabando: tiempo, % de terreno, entidades, tamaño |
+| `/replay jugador start\|stop [jugador]` | Graba lo que ve un jugador concreto (`replays/jugadores/`) |
 
 ## Estado
 
@@ -82,10 +86,12 @@ falla con Forge 47: Replay Mod original en Fabric para contenido vanilla.
   `com.wwrp2.feature.replay.mixin`. Si un punto de enganche no existe, el servidor no arranca y lo
   dice (`required` + `defaultRequire: 1`). Otras features que quieran Mixin añaden su propia config
   y una línea `config` en `build.gradle`.
-- [ ] **Paso 2: estado inicial** (Join Game, jugadores, posición, chunks, entidades, inventario,
-  hora y clima al empezar a grabar).
-- [ ] **Paso 3: marcadores** automáticos y comandos de admin para añadir, editar y borrar.
-- [ ] **Paso 4: pruebas** con varios jugadores y con ReForgedPlay.
+- [x] **Fase 1: grabador de zona (2026-11-12), probado en servidor sin jugadores.** Graba todo lo
+  que pasa en un rectángulo del Overworld con Mixin, sin jugador falso, y genera el estado inicial
+  (login, mundo, hora, clima, jugadores y todo el terreno de la zona). Detalle, resultados y
+  limitaciones en [`PLAN.md`](PLAN.md). Probado con jugador y **visto en Replay Mod (Fabric
+  1.20.1): funciona.**
+- [ ] Fase 2: rondas. Fase 3: marcadores. Fase 4: visor en el servidor. Fase 5: escala.
 
 ## Cómo probar
 
@@ -98,26 +104,32 @@ falla con Forge 47: Replay Mod original en Fabric para contenido vanilla.
   `380df991-f603-344c-a090-369bad2a924a`), o lanza el servidor desde IntelliJ
   (`./gradlew genIntellijRuns`), donde la consola sí funciona.
 - Cliente: `./gradlew runClient` → Multijugador → `localhost`.
+- Para lanzar comandos sin cliente se puede activar RCON en `run/server.properties`
+  (`enable-rcon=true`, `rcon.password=...`) y usar cualquier cliente RCON. Acordarse de quitarlo.
 
-## Cómo ver un replay (pendiente de probar)
+## Cómo ver un replay
 
-- **ReForgedPlay 0.3.2** (ferriarnus, Forge 1.20.1), por CurseForge. El repositorio
-  (`github.com/ferriarnus/ReForgedPlay`, rama `1.20.1`) no publica descargas.
+Hasta la fase 4 (visor en el servidor) solo se puede ver con un visor externo.
+
+- **Probado y funciona (mundo vanilla):** instancia aparte con Minecraft 1.20.1 + Fabric + Fabric
+  API + Replay Mod (de replaymod.com). Copiar el `.mcpr` a `replay_recordings/` de esa instancia y
+  abrirlo con **Replay Viewer**. No ve el contenido de otros mods.
+- **Para el modpack completo (sin probar todavía):** ReForgedPlay 0.3.2 (ferriarnus, Forge 1.20.1),
+  por CurseForge; el repositorio (`github.com/ferriarnus/ReForgedPlay`, rama `1.20.1`) no publica
+  descargas. Instancia normal (launcher de CurseForge o Prism) con 1.20.1 + Forge 47.x +
+  ReForgedPlay; mismo procedimiento con `replay_recordings/` y **Replay Viewer**.
 - **No en `runClient`:** el entorno de desarrollo usa otros nombres de código y los mods publicados
-  suelen romperse ahí. Usar una instancia normal (launcher de CurseForge o Prism) con 1.20.1 +
-  Forge 47.x + ReForgedPlay. Nuestro mod no hace falta para ver.
-- Copiar el `.mcpr` a `replay_recordings/` de esa instancia y abrirlo con **Replay Viewer** en el
-  menú principal.
+  suelen romperse ahí. Nuestro mod no hace falta para ver.
 
 ## Acciones futuras
 
 - [x] ~~Investigar cómo acceder al pipeline de red por jugador en Forge 47.~~ Hecho (ver hallazgos).
 - [x] ~~Diseñar el esqueleto del grabador.~~ Hecho en el paso 1.
-- [ ] Paso 2: estado inicial.
+- [x] ~~Paso 2: estado inicial.~~ Hecho dentro de la fase 1 (grabador de zona).
 - [ ] Probar el `.mcpr` en ReForgedPlay y comprobar que muestra los marcadores de `markers.json`.
 - [ ] Decidir qué eventos de partida cuentan como highlight y su prioridad.
 - [ ] Definir la sintaxis de los comandos de admin para marcadores y sus permisos.
-- [ ] ¿Grabar a todos automáticamente al empezar una ronda? Valorar integrarlo con la feature `rondas`.
+- [ ] Fase 2: arrancar y parar solo con la feature `rondas` (decidido: Preparación → fin de ronda).
 - [ ] Probar con ~20 jugadores: tamaño de archivo, carga del servidor y disco.
 - [ ] Política de almacenamiento: dónde se guardan los replays y cuándo se borran los viejos.
 - [ ] Si ReForgedPlay no sirve: plan B Replay Mod original en Fabric (solo contenido vanilla).

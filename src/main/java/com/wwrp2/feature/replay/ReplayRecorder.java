@@ -14,7 +14,9 @@ import io.netty.channel.ChannelPromise;
 import net.minecraft.SharedConstants;
 import net.minecraft.network.ConnectionProtocol;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundBundlePacket;
 import net.minecraft.network.protocol.login.ClientboundGameProfilePacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
@@ -22,38 +24,43 @@ import org.slf4j.Logger;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * Graba lo que el servidor envía a un jugador y lo guarda como un {@code .mcpr} (formato de Replay Mod).
+ * Escribe un replay en formato {@code .mcpr} (el de Replay Mod): un zip con {@code recording.tmcpr}
+ * (por paquete: tiempo en ms, longitud y bytes), {@code metaData.json} y {@code markers.json}.
  *
- * <p>Se engancha al pipeline de Netty del jugador con un handler de salida colocado justo después del
- * {@code encoder}: así recibe cada paquete ya codificado (id + datos), que es lo que guarda el replay.
- * La escritura a disco va en un hilo aparte para no frenar la red.</p>
+ * <p>Los paquetes pueden llegar ya codificados (handler de Netty de un jugador, ver
+ * {@link #attachTo(ServerPlayer)}) o como objetos (grabación de zona, ver {@link #recordPacket(Packet)}).
+ * La escritura a disco va en un hilo aparte para no frenar el servidor ni la red.</p>
  */
 public final class ReplayRecorder {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String HANDLER_NAME = "wwrp2_replay";
     /** Versión del formato de archivo de Replay Mod (ReplayMetaData.CURRENT_FILE_FORMAT_VERSION). */
     private static final int FILE_FORMAT_VERSION = 14;
+    /** Versión de nuestro propio formato, por si cambiamos algo y hay que leer replays viejos. */
+    public static final int WWRP2_FORMAT_VERSION = 1;
 
     /** Marcador de la línea de tiempo (tiempo en ms desde el inicio de la grabación). */
     public record Marker(int time, String name, double x, double y, double z, float yaw, float pitch) {
     }
 
-    private final ServerPlayer player;
-    private final GameProfile profile;
+    private final String name;
     private final Path output;
     private final Path tempRecording;
     private final long startMillis = System.currentTimeMillis();
@@ -63,14 +70,17 @@ public final class ReplayRecorder {
         return t;
     });
     private final List<Marker> markers = new ArrayList<>();
+    private final Set<String> players = ConcurrentHashMap.newKeySet();
+    private final Set<Class<?>> warnedPackets = ConcurrentHashMap.newKeySet();
     private final DataOutputStream recording;
+    private final AtomicLong rawBytes = new AtomicLong();
 
     private volatile boolean stopped;
     private volatile int lastTimestamp;
+    private ServerPlayer attachedPlayer;
 
-    public ReplayRecorder(ServerPlayer player, Path directory, String fileName) throws IOException {
-        this.player = player;
-        this.profile = player.getGameProfile();
+    public ReplayRecorder(Path directory, String fileName) throws IOException {
+        this.name = fileName;
         Files.createDirectories(directory);
         this.output = directory.resolve(fileName + ".mcpr");
         this.tempRecording = directory.resolve(fileName + ".tmcpr.tmp");
@@ -85,31 +95,66 @@ public final class ReplayRecorder {
         return (int) (System.currentTimeMillis() - this.startMillis);
     }
 
-    /** Empieza a grabar: el replay arranca con el login del jugador y después los paquetes de juego. */
-    public void start() {
-        ChannelPipeline pipeline = this.player.connection.connection.channel().pipeline();
-        if (pipeline.get("encoder") == null) {
-            // El anfitrión de un mundo singleplayer/LAN no pasa por red: sus paquetes no se codifican.
-            throw new IllegalStateException("La conexión de " + this.profile.getName()
-                    + " es local (anfitrión de singleplayer/LAN) y no se puede grabar");
-        }
+    /** Bytes sin comprimir grabados hasta ahora. */
+    public long rawBytes() {
+        return this.rawBytes.get();
+    }
 
-        // Replay Mod espera que el flujo empiece en fase LOGIN con un "Login Success".
-        ClientboundGameProfilePacket login = new ClientboundGameProfilePacket(this.profile);
+    /** Apunta un jugador en los metadatos (Replay Mod lo usa para la lista de jugadores). */
+    public void addPlayer(UUID uuid) {
+        this.players.add(uuid.toString());
+    }
+
+    /** Replay Mod espera que el flujo empiece en fase LOGIN con un "Login Success". */
+    public void recordLogin(GameProfile profile) {
+        ClientboundGameProfilePacket login = new ClientboundGameProfilePacket(profile);
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         try {
             buf.writeVarInt(ConnectionProtocol.LOGIN.getPacketId(PacketFlow.CLIENTBOUND, login));
             login.write(buf);
-            record(buf);
+            recordEncoded(buf);
         } finally {
             buf.release();
         }
-
-        pipeline.addBefore("encoder", HANDLER_NAME, new Handler());
     }
 
-    /** Copia el paquete ya codificado y lo encola para escribirlo. Se puede llamar desde cualquier hilo. */
-    private void record(ByteBuf packet) {
+    /** Codifica un paquete de juego y lo graba. Los bundles se graban paquete a paquete. */
+    public void recordPacket(Packet<?> packet) {
+        if (this.stopped) {
+            return;
+        }
+        if (packet instanceof ClientboundBundlePacket bundle) {
+            for (Packet<?> sub : bundle.subPackets()) {
+                recordPacket(sub);
+            }
+            return;
+        }
+        int id = ConnectionProtocol.PLAY.getPacketId(PacketFlow.CLIENTBOUND, packet);
+        if (id < 0) {
+            warnOnce(packet, null);
+            return;
+        }
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            buf.writeVarInt(id);
+            packet.write(buf);
+            recordEncoded(buf);
+        } catch (RuntimeException e) {
+            warnOnce(packet, e);
+        } finally {
+            buf.release();
+        }
+    }
+
+    private void warnOnce(Packet<?> packet, Exception e) {
+        if (this.warnedPackets.add(packet.getClass())) {
+            LOGGER.warn("Replay {}: no se puede grabar el paquete {}, se omite", this.name,
+                    packet.getClass().getSimpleName(), e);
+        }
+    }
+
+    /** Copia un paquete ya codificado (id + datos) y lo encola. Se puede llamar desde cualquier hilo. */
+    public void recordEncoded(ByteBuf packet) {
         if (this.stopped) {
             return;
         }
@@ -117,26 +162,40 @@ public final class ReplayRecorder {
         byte[] data = new byte[packet.readableBytes()];
         packet.getBytes(packet.readerIndex(), data);
         this.lastTimestamp = timestamp;
+        this.rawBytes.addAndGet(data.length + 8L);
         this.writer.execute(() -> {
             try {
                 this.recording.writeInt(timestamp);
                 this.recording.writeInt(data.length);
                 this.recording.write(data);
             } catch (IOException e) {
-                LOGGER.error("No se pudo escribir un paquete del replay de {}", this.profile.getName(), e);
+                LOGGER.error("No se pudo escribir un paquete del replay {}", this.name, e);
             }
         });
     }
 
-    public synchronized void addMarker(String name) {
-        this.markers.add(new Marker(elapsedMillis(), name,
-                this.player.getX(), this.player.getY(), this.player.getZ(),
-                this.player.getYRot(), this.player.getXRot()));
+    /**
+     * Graba lo que el servidor envía a un jugador real enganchándose a su pipeline de Netty, justo
+     * después del {@code encoder}. Falla si la conexión es local (anfitrión de singleplayer/LAN).
+     */
+    public void attachTo(ServerPlayer player) {
+        ChannelPipeline pipeline = player.connection.connection.channel().pipeline();
+        if (pipeline.get("encoder") == null) {
+            throw new IllegalStateException("La conexión de " + player.getGameProfile().getName()
+                    + " es local (anfitrión de singleplayer/LAN) y no se puede grabar");
+        }
+        pipeline.addBefore("encoder", HANDLER_NAME, new Handler());
+        this.attachedPlayer = player;
+    }
+
+    public synchronized void addMarker(String name, double x, double y, double z, float yaw, float pitch) {
+        this.markers.add(new Marker(elapsedMillis(), name, x, y, z, yaw, pitch));
     }
 
     /** Cancela una grabación que no llegó a arrancar: cierra y borra el temporal sin crear el .mcpr. */
     public void discard() {
         this.stopped = true;
+        detach();
         this.writer.execute(() -> {
             try {
                 this.recording.close();
@@ -154,12 +213,7 @@ public final class ReplayRecorder {
             return CompletableFuture.completedFuture(this.output);
         }
         this.stopped = true;
-
-        try {
-            this.player.connection.connection.channel().pipeline().remove(HANDLER_NAME);
-        } catch (NoSuchElementException ignored) {
-            // El jugador ya se había desconectado y el pipeline ya no tiene el handler.
-        }
+        detach();
 
         CompletableFuture<Path> done = new CompletableFuture<>();
         this.writer.execute(() -> {
@@ -168,7 +222,7 @@ public final class ReplayRecorder {
                 pack();
                 done.complete(this.output);
             } catch (Exception e) {
-                LOGGER.error("No se pudo guardar el replay de {}", this.profile.getName(), e);
+                LOGGER.error("No se pudo guardar el replay {}", this.name, e);
                 done.completeExceptionally(e);
             } finally {
                 try {
@@ -180,6 +234,17 @@ public final class ReplayRecorder {
         });
         this.writer.shutdown();
         return done;
+    }
+
+    private void detach() {
+        if (this.attachedPlayer == null) {
+            return;
+        }
+        try {
+            this.attachedPlayer.connection.connection.channel().pipeline().remove(HANDLER_NAME);
+        } catch (NoSuchElementException ignored) {
+            // El jugador ya se había desconectado y el pipeline ya no tiene el handler.
+        }
     }
 
     private void pack() throws IOException {
@@ -208,11 +273,11 @@ public final class ReplayRecorder {
         meta.addProperty("fileFormat", "MCPR");
         meta.addProperty("fileFormatVersion", FILE_FORMAT_VERSION);
         meta.addProperty("protocol", SharedConstants.getProtocolVersion());
-        meta.addProperty("generator", "wwrp-2 replay");
+        meta.addProperty("generator", "wwrp-2 replay v" + WWRP2_FORMAT_VERSION);
         meta.addProperty("selfId", -1);
-        JsonArray players = new JsonArray();
-        players.add(this.profile.getId().toString());
-        meta.add("players", players);
+        JsonArray list = new JsonArray();
+        this.players.forEach(list::add);
+        meta.add("players", list);
         return new Gson().toJson(meta);
     }
 
@@ -244,7 +309,7 @@ public final class ReplayRecorder {
         @Override
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
             if (msg instanceof ByteBuf buf) {
-                record(buf);
+                recordEncoded(buf);
             }
             super.write(ctx, msg, promise);
         }

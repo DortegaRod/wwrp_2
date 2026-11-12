@@ -47,7 +47,7 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 | Fase | Qué incluye | Estado |
 |---|---|---|
 | **0. Grabador base** | Handler de Netty tras el `encoder`, escritura en hilo aparte, `.mcpr`, comandos `/replay start\|stop\|list`. | ✅ Hecho (2026-11-11) |
-| **1. Grabador de zona** | Ver detalle abajo. | 🔧 En curso: Mixin configurado y `develop` traído |
+| **1. Grabador de zona** | Ver detalle abajo. | ✅ Hecho (2026-11-12). Probado con jugador y **visto en Replay Mod (Fabric 1.20.1)**: funciona |
 | **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | |
 | **3. Marcadores** | Automáticos: kills, muertes, rachas, cambios de fase. Comandos de admin para listar, añadir, editar y borrar, en grabaciones en curso y ya guardadas (`markers.json`). | |
 | **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. | |
@@ -55,22 +55,44 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 | **4c. Highlights** | Menú de marcadores como capítulos para ir directo a cada kill. Seguir a un jugador en primera o tercera persona. | |
 | **4d. Ver en grupo** | Varios espectadores en la misma sesión; un líder controla. | |
 | **5. Escala** | Prueba con ~20 jugadores: tamaño, CPU y disco. Política de borrado de replays viejos. Más compresión solo si los números lo piden. | |
-| **Extra** | Comprobar que el `.mcpr` abre en ReForgedPlay (vídeos cinematográficos). | Cuando se pueda |
+| **Extra** | Comprobar que el `.mcpr` abre en ReForgedPlay con el modpack completo (vídeos cinematográficos). Ya abre en Replay Mod original (Fabric). | Cuando se pueda |
 
 ### Detalle de la fase 1: grabador de zona
 
 1. ~~Traer `develop` a la rama (incluye la feature `rondas`).~~ Hecho.
 2. ~~Configurar Mixin.~~ Hecho: `settings.gradle`, `build.gradle` y `src/main/resources/wwrp2.replay.mixins.json`.
-3. `/replay zona <esquina1> <esquina2>`: guarda la zona en la config del servidor.
-4. Estado inicial al empezar: Login Success, Join Game, todos los chunks de la zona con luz,
+3. ~~`/replay zona <esquina1> <esquina2>`~~ Hecho: se guarda en `<mundo>/wwrp2_replay_zona.json`.
+   Máximo 64 chunks por lado (el cliente del replay solo guarda los chunks a 32 + 3 del centro).
+4. ~~Estado inicial~~ Hecho. Estado inicial al empezar: Login Success, Join Game, todos los chunks de la zona con luz,
    entidades presentes (con equipo, metadatos y pasajeros), hora, clima, borde del mundo, lista de
    jugadores.
-5. Durante la grabación, mixins que copian al grabador lo que el servidor reparte en la zona:
+5. ~~Mixin de grabación~~ Hecho (`replay.mixin`): `ChunkHolder` (bloques, luz y block entities,
+   aunque nadie mire el chunk), `TrackedEntity` (todo lo de cada entidad), `PlayerList` (difusiones
+   globales, por dimensión, sonidos/efectos por punto y mensajes del sistema) y `ServerLevel`
+   (partículas, explosiones y bloques rompiéndose). Las entidades que entran o salen de la zona se
+   revisan cada tick. El chat de jugadores se graba con `ServerChatEvent`. Sin MixinExtras (Forge 47
+   no lo trae). Plan original: mixins que copian al grabador lo que el servidor reparte en la zona:
    chunks que se cargan o descargan, cambios de bloques, entidades (todas, sin límite de
    distancia), sonidos, partículas, explosiones, chat y lista de jugadores.
-6. Reutilizar `ReplayRecorder`: misma escritura y empaquetado que en la fase 0.
-7. Añadir número de versión del formato propio en los metadatos.
-8. Validar con el analizador del `.mcpr` (paquetes, tiempos, Join Game presente, chunks de la zona).
+6. ~~Reutilizar `ReplayRecorder`~~ Hecho: ahora acepta paquetes como objetos además de bytes.
+7. ~~Versión del formato propio~~ Hecho: `generator` = `wwrp-2 replay v1`.
+8. ~~Validar con el analizador~~ Hecho sin jugadores: zona de 20×20 chunks, 14 s, 1.349 paquetes sin
+   errores; Join Game, los 400 chunks con luz, 130 entidades con metadatos, hora cada segundo.
+   13,6 MB sin comprimir y 2 MB comprimido (casi todo es terreno).
+9. ~~Probar con jugadores y abrirlo en un visor~~ Hecho: grabado con un jugador en `runServer` y
+   abierto en **Replay Mod original (Fabric 1.20.1)** en una instancia aparte. Se ve y se puede
+   volar libremente. Queda por comprobar con el modpack completo en ReForgedPlay (contenido
+   modded) y revisar en detalle explosiones y chat en una zona grande.
+
+**Limitaciones conocidas de la fase 1:**
+- `/say` y otros mensajes de chat «de sistema firmados» no se graban (sí el chat normal y las
+  muertes). Se mira si hace falta.
+- Lo que un jugador recibe solo para él (su vida, su inventario) no está en el replay de zona.
+- Tamaño estimado del terreno de un mapa 1000×1000 (~4.000 chunks): ~135 MB sin comprimir y ~20 MB
+  comprimido, solo al empezar. Se mide de verdad en la fase 5.
+- El mapa debe estar ya generado: al empezar se cargan todos los chunks de la zona (≈10 ms por tick).
+- Contenido modded: los IDs de bloques e items de otros mods dependen del registro de Forge; el
+  replay no incluye el handshake de Forge. Hay que comprobarlo al probar con el modpack completo.
 
 ## Decisiones pendientes
 

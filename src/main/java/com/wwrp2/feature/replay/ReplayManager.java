@@ -1,6 +1,7 @@
 package com.wwrp2.feature.replay;
 
 import com.mojang.logging.LogUtils;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 
@@ -13,7 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Lleva la cuenta de qué jugadores se están grabando ahora mismo. */
+/** Grabaciones del punto de vista de jugadores concretos (lo que reciben ellos por red). */
 public final class ReplayManager {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
@@ -22,22 +23,32 @@ public final class ReplayManager {
     private ReplayManager() {
     }
 
+    /** Carpeta donde se guardan todos los replays. */
+    public static Path replaysDir(MinecraftServer server) {
+        return server.getServerDirectory().toPath().resolve("replays");
+    }
+
+    public static String stamp() {
+        return LocalDateTime.now().format(STAMP);
+    }
+
     /** Empieza a grabar al jugador. Devuelve {@code null} si ya se estaba grabando o si falla. */
     public static ReplayRecorder start(ServerPlayer player) {
         if (RECORDERS.containsKey(player.getUUID())) {
             return null;
         }
-        Path dir = player.server.getServerDirectory().toPath().resolve("replays");
-        String name = player.getGameProfile().getName() + "_" + LocalDateTime.now().format(STAMP);
+        String name = player.getGameProfile().getName() + "_" + stamp();
         ReplayRecorder recorder;
         try {
-            recorder = new ReplayRecorder(player, dir, name);
+            recorder = new ReplayRecorder(replaysDir(player.server).resolve("jugadores"), name);
         } catch (IOException e) {
             LOGGER.error("No se pudo crear el archivo del replay de {}", player.getGameProfile().getName(), e);
             return null;
         }
         try {
-            recorder.start();
+            recorder.recordLogin(player.getGameProfile());
+            recorder.addPlayer(player.getUUID());
+            recorder.attachTo(player);
         } catch (RuntimeException e) {
             LOGGER.error("No se pudo empezar el replay de {}: {}", player.getGameProfile().getName(), e.getMessage());
             recorder.discard();
@@ -54,10 +65,6 @@ public final class ReplayManager {
             recorder.stop();
         }
         return recorder;
-    }
-
-    public static ReplayRecorder get(UUID player) {
-        return RECORDERS.get(player);
     }
 
     public static Collection<ReplayRecorder> all() {
