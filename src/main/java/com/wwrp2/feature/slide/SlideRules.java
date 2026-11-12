@@ -15,12 +15,12 @@ public final class SlideRules {
     public static final int BASE_DURATION_TICKS = 10;
 
     /** Por cuánto se multiplica la velocidad al empezar, con el impulso lleno y con el impulso vacío. */
-    public static final double FULL_BOOST = 1.5;
+    public static final double FULL_BOOST = 1.7;
     public static final double BASE_BOOST = 1.15;
     /** Tope de la velocidad inicial, para que encadenar saltos y deslizamientos no acelere sin fin. */
-    public static final double MAX_START_SPEED = 0.62;
+    public static final double MAX_START_SPEED = 1.0;
     /** Parte de la velocidad inicial que queda al terminar; se pierde despacio al principio y rápido al final. */
-    public static final double END_SPEED_FRACTION = 0.45;
+    public static final double END_SPEED_FRACTION = 0.4;
 
     /** Ticks que tarda en recargarse el impulso entero después de un deslizamiento. */
     public static final int ENERGY_RECHARGE_TICKS = 50;
@@ -31,7 +31,7 @@ public final class SlideRules {
     public static final float TURN_DEGREES_PER_TICK = 4.5F;
     /** Ticks seguidos en el aire (al salir por un borde) antes de dar el deslizamiento por terminado. */
     public static final int MAX_AIR_TICKS = 6;
-    /** Ticks que se recuerda la tecla de deslizarse pulsada en el aire, para deslizarse al aterrizar. */
+    /** Ticks que se recuerda un agacharse hecho en el aire, para deslizarse al aterrizar. */
     public static final int LANDING_BUFFER_TICKS = 8;
     /** Velocidad máxima que se conserva al cortar el deslizamiento con un salto. */
     public static final double JUMP_CARRY_MAX_SPEED = 0.40;
