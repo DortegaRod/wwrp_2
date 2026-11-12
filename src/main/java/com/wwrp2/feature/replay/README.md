@@ -2,12 +2,17 @@
 
 Responsable: **Mistic** · Rama: `feature/replay` · Paquete: `com.wwrp2.feature.replay`
 
+> **Plan de desarrollo completo (fases, decisiones pendientes y riesgos): [`PLAN.md`](PLAN.md).**
+
 ## Qué es
 
 Grabar las partidas en el **servidor** como replay, para ver highlights después. No se graba
 vídeo: se guarda el flujo de paquetes (posiciones, chunks, entidades, bloques, sonidos, chat) en
 un archivo `.mcpr` que se abre con **Replay Mod**. Desde ahí se puede ver la partida con cualquier
 cámara: POV de cualquier jugador, cámara libre, travellings y exportación a vídeo.
+
+Objetivo final: replays al estilo Hypixel, que se ven **dentro del propio servidor**, sin mods.
+El mismo `.mcpr` sirve también para ReForgedPlay (vídeos cinematográficos).
 
 ## Decisiones tomadas
 
@@ -18,6 +23,10 @@ cámara: POV de cualquier jugador, cámara libre, travellings y exportación a v
 | Visor | Replay Mod (en Forge 1.20.1: **ReForgedPlay**, port de la comunidad; el original es Fabric) | Ya trae línea de tiempo, keyframes y exportación. Visor propio solo si resulta inviable en 1.20.1 Forge |
 | Formato | `.mcpr` | Es lo que lee Replay Mod |
 | Escala | Menos de 20 jugadores | Estimación del equipo (~98 % seguro) |
+| Mapa | ≈1000 × 1000 bloques, solo Overworld | Dato del equipo |
+| Qué se graba | Una zona del mapa (dos esquinas), un archivo por ronda | Cámara libre por todo el mapa y todos los marcadores juntos |
+| Cuándo se graba | Automático con `rondas` + comandos manuales | Que no dependa de que un admin se acuerde |
+| Cómo se graba la zona | Grabador enganchado con Mixin (pendiente de aprobar) | Un jugador falso no cubre 1000×1000 ni ve proyectiles lejanos (ver `PLAN.md`) |
 | Marcadores | Automáticos, y el admin puede añadir, editar y borrar | Petición del equipo |
 | Dependencias | Ninguna nueva | Replay Mod solo hace falta para reproducir, no para grabar |
 
@@ -31,7 +40,7 @@ falla con Forge 47: Replay Mod original en Fabric para contenido vanilla.
 
 ## Hallazgos de la investigación (Forge 47 / 1.20.1)
 
-- **Sin Mixin ni cambios en `build.gradle`.** El pipeline de Netty de cada jugador es
+- **Grabar a un jugador (fase 0) no necesita Mixin.** El pipeline de Netty de cada jugador es
   `splitter, decoder, prepender, encoder, unbundler, bundler, packet_handler`. Un handler de
   salida colocado con `pipeline.addBefore("encoder", ...)` recibe cada paquete **ya codificado**
   (id + datos), que es justo lo que guarda el `.mcpr`. Los bundles ya vienen separados.
