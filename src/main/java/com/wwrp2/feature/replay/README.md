@@ -26,7 +26,7 @@ El mismo `.mcpr` sirve también para ReForgedPlay (vídeos cinematográficos).
 | Mapa | ≈1000 × 1000 bloques, solo Overworld | Dato del equipo |
 | Qué se graba | Una zona del mapa (dos esquinas), un archivo por ronda | Cámara libre por todo el mapa y todos los marcadores juntos |
 | Cuándo se graba | Automático con `rondas` + comandos manuales | Que no dependa de que un admin se acuerde |
-| Cómo se graba la zona | Grabador enganchado con Mixin (pendiente de aprobar) | Un jugador falso no cubre 1000×1000 ni ve proyectiles lejanos (ver `PLAN.md`) |
+| Cómo se graba la zona | Grabador enganchado con Mixin (aprobado y configurado el 2026-11-12) | Un jugador falso no cubre 1000×1000 ni ve proyectiles lejanos (ver `PLAN.md`) |
 | Marcadores | Automáticos, y el admin puede añadir, editar y borrar | Petición del equipo |
 | Dependencias | Ninguna nueva | Replay Mod solo hace falta para reproducir, no para grabar |
 
@@ -77,6 +77,11 @@ falla con Forge 47: Replay Mod original en Fabric para contenido vanilla.
     crecientes, primer paquete Login Success (`0x02`), metadatos con versión 1.20.1 y protocolo 763.
   - **Limitación:** falta el estado inicial. El análisis da 0 paquetes Join Game, 0 de posición
     inicial y solo los chunks cargados después de empezar. Sin eso, ReForgedPlay no podrá abrirlo.
+- [x] **Mixin configurado (2026-11-12):** plugin MixinGradle 0.7.38, procesador Mixin 0.8.5 (la que
+  trae Forge 47) y config propia `wwrp2.replay.mixins.json` con los Mixin en
+  `com.wwrp2.feature.replay.mixin`. Si un punto de enganche no existe, el servidor no arranca y lo
+  dice (`required` + `defaultRequire: 1`). Otras features que quieran Mixin añaden su propia config
+  y una línea `config` en `build.gradle`.
 - [ ] **Paso 2: estado inicial** (Join Game, jugadores, posición, chunks, entidades, inventario,
   hora y clima al empezar a grabar).
 - [ ] **Paso 3: marcadores** automáticos y comandos de admin para añadir, editar y borrar.

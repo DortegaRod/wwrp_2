@@ -47,7 +47,7 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 | Fase | Qué incluye | Estado |
 |---|---|---|
 | **0. Grabador base** | Handler de Netty tras el `encoder`, escritura en hilo aparte, `.mcpr`, comandos `/replay start\|stop\|list`. | ✅ Hecho (2026-11-11) |
-| **1. Grabador de zona** | Ver detalle abajo. | ⏳ Pendiente de decisión (Mixin) |
+| **1. Grabador de zona** | Ver detalle abajo. | 🔧 En curso: Mixin configurado y `develop` traído |
 | **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | |
 | **3. Marcadores** | Automáticos: kills, muertes, rachas, cambios de fase. Comandos de admin para listar, añadir, editar y borrar, en grabaciones en curso y ya guardadas (`markers.json`). | |
 | **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. | |
@@ -59,8 +59,8 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 
 ### Detalle de la fase 1: grabador de zona
 
-1. Traer `develop` a la rama (incluye la feature `rondas`).
-2. Configurar Mixin (requiere cambio en `build.gradle`, ver decisión pendiente).
+1. ~~Traer `develop` a la rama (incluye la feature `rondas`).~~ Hecho.
+2. ~~Configurar Mixin.~~ Hecho: `settings.gradle`, `build.gradle` y `src/main/resources/wwrp2.replay.mixins.json`.
 3. `/replay zona <esquina1> <esquina2>`: guarda la zona en la config del servidor.
 4. Estado inicial al empezar: Login Success, Join Game, todos los chunks de la zona con luz,
    entidades presentes (con equipo, metadatos y pasajeros), hora, clima, borde del mundo, lista de
@@ -74,7 +74,9 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 
 ## Decisiones pendientes
 
-- [ ] **Añadir Mixin a `build.gradle`** (plugin `org.spongepowered.mixin` para generar el refmap,
+- [x] **Añadir Mixin a `build.gradle`** — aprobado por el admin y aplicado el 2026-11-12. Verificado:
+  `./gradlew build` pasa, el manifiesto lleva `MixinConfigs: wwrp2.replay.mixins.json` y en
+  `runServer` Mixin registra la config sin errores. Detalle original de la propuesta: (plugin `org.spongepowered.mixin` para generar el refmap,
   procesador de anotaciones y el atributo `MixinConfigs` en el manifiesto del jar). El runtime de
   Mixin ya viene con Forge. Necesita el permiso del responsable de la feature y, por tocar algo
   compartido, conviene avisar al equipo. **Alternativa sin Mixin:** subir `view-distance` a 32 para
