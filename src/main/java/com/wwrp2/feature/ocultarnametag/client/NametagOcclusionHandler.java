@@ -3,6 +3,7 @@ package com.wwrp2.feature.ocultarnametag.client;
 import com.wwrp2.Wwrp2;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ClipContext;
@@ -11,6 +12,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderNameTagEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -23,6 +25,20 @@ import net.minecraftforge.fml.common.Mod;
 public final class NametagOcclusionHandler {
 
     private NametagOcclusionHandler() {
+    }
+
+    /**
+     * Los mods de culling, como Entity Culling, no dibujan a los jugadores que creen tapados, pero
+     * con su opción de nombres a través de paredes dibujan el nametag ellos mismos, sin pasar por
+     * {@link RenderNameTagEvent}, y aquí no se podría ocultar. Con {@code noCulling} esos mods dejan
+     * a los jugadores fuera, así que su nametag siempre pasa por este evento. Solo afecta a los
+     * demás jugadores del cliente, que son pocos, así que apenas cuesta rendimiento.
+     */
+    @SubscribeEvent
+    public static void onPlayerJoin(EntityJoinLevelEvent event) {
+        if (event.getLevel().isClientSide() && event.getEntity() instanceof RemotePlayer player) {
+            player.noCulling = true;
+        }
     }
 
     @SubscribeEvent
