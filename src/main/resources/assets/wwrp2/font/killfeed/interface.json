@@ -1,0 +1,15 @@
+{
+  "providers": [
+    {
+      "type": "ttf",
+      "file": "wwrp2:killfeed/rajdhani-semibold.ttf",
+      "shift": [0, 0],
+      "size": 11,
+      "oversample": 3
+    },
+    {
+      "type": "reference",
+      "id": "minecraft:default"
+    }
+  ]
+}

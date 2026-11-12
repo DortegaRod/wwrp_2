@@ -1,0 +1,4 @@
+Rajdhani SemiBold — archivo de fuente original sin modificar.
+Copyright (c) 2014, Indian Type Foundry.
+Fuente: https://github.com/google/fonts/tree/main/ofl/rajdhani
+Distribuida con SIL Open Font License 1.1, incluida en ofl.txt.
