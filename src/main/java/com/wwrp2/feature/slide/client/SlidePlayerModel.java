@@ -14,7 +14,9 @@ import net.minecraft.world.entity.HumanoidArm;
  *
  * <p>Minecraft calcula primero su postura normal y aquí se mezcla con la de deslizarse según
  * {@link SlideClientState#blend}, así se entra y se sale de ella sin saltos. La armadura y lo
- * que se lleva en las manos siguen al modelo; la capa y los élitros no, se dibujan aparte.</p>
+ * que se lleva en las manos siguen al modelo. La capa se dibuja aparte y colgaría a la altura
+ * de un jugador de pie, así que mientras dura la postura se esconde aquí y la dibuja
+ * {@link SlideCapeLayer} desde la espalda. Los élitros no la siguen.</p>
  *
  * <p>Las medidas van en píxeles del modelo (16 por bloque antes de escalar), con la Y hacia
  * abajo y el jugador mirando hacia −Z. En los giros en X, un valor negativo lleva la punta de
@@ -59,11 +61,53 @@ public class SlidePlayerModel extends PlayerModel<AbstractClientPlayer> {
      */
     private static final float BUSY_ARM_X_ROT = -0.5F;
 
+    /** La capa cuelga de la espalda: a 2 píxeles del centro del torso, a la altura del cuello. */
+    private static final float BACK_OFFSET = 2.0F;
+    /** A qué altura sobre el suelo queda ese punto con la postura completa. */
+    static final float CAPE_HINGE_HEIGHT = HIP_HEIGHT + TORSO_LENGTH * TORSO_LEAN_COS + BACK_OFFSET * TORSO_LEAN_SIN;
+
+    /** La misma pieza que el {@code cloak} de PlayerModel, que es privado. */
+    private final ModelPart cloak;
+
     /** Si el último dibujado dejó la cabeza y el torso desplazados en Z, que Minecraft no recoloca. */
     private boolean posed;
+    /** Si se ha escondido la capa en este dibujado para que la ponga {@link SlideCapeLayer}. */
+    private boolean capeHidden;
+    private float capeBlend;
+    private float capeHingeY;
+    private float capeHingeZ;
 
     public SlidePlayerModel(ModelPart root, boolean slim) {
         super(root, slim);
+        cloak = root.getChild("cloak");
+    }
+
+    /**
+     * Vuelve a hacer visible la capa si se escondió en este dibujado.
+     *
+     * @return si estaba escondida, y por tanto le toca dibujarla a quien llama
+     */
+    boolean restoreCape() {
+        if (!capeHidden) {
+            return false;
+        }
+        cloak.visible = true;
+        capeHidden = false;
+        return true;
+    }
+
+    /** Cuánto de la postura lleva el jugador que se está dibujando, ya suavizado. */
+    float capeBlend() {
+        return capeBlend;
+    }
+
+    /** Dónde cuelga la capa con la postura completa, en píxeles del modelo. */
+    float capeHingeY() {
+        return capeHingeY;
+    }
+
+    float capeHingeZ() {
+        return capeHingeZ;
     }
 
     @Override
@@ -75,6 +119,7 @@ public class SlidePlayerModel extends PlayerModel<AbstractClientPlayer> {
             body.z = 0.0F;
             posed = false;
         }
+        capeHidden = false;
         super.setupAnim(player, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
 
         // El brazo en primera persona se dibuja con este mismo modelo y la edad a 0
@@ -112,6 +157,14 @@ public class SlidePlayerModel extends PlayerModel<AbstractClientPlayer> {
                 rightHanded ? swingingOffArm : swingingMainArm);
 
         posed = true;
+
+        if (cloak.visible) {
+            cloak.visible = false;
+            capeHidden = true;
+            capeBlend = blend;
+            capeHingeY = neckY - BACK_OFFSET * TORSO_LEAN_SIN;
+            capeHingeZ = neckZ + BACK_OFFSET * TORSO_LEAN_COS;
+        }
 
         // Las capas de la skin copian a su pieza dentro de super.setupAnim: hay que repetirlo.
         hat.copyFrom(head);

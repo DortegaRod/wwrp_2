@@ -16,7 +16,8 @@ import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 import org.slf4j.Logger;
 
 /**
- * Cambia el modelo de los renderers de jugador por {@link SlidePlayerModel}. Forge no tiene
+ * Cambia el modelo de los renderers de jugador por {@link SlidePlayerModel}, y les añade
+ * {@link SlideCapeLayer} para que la capa siga a la postura. Forge no tiene
  * ningún evento para tocar la postura de un jugador después de que Minecraft la calcule, y la
  * única forma sin mixins es que el propio modelo sea el nuestro.
  *
@@ -52,6 +53,7 @@ public final class SlideModelInstaller {
                 SlidePlayerModel model = new SlidePlayerModel(
                         event.getEntityModels().bakeLayer(slim ? ModelLayers.PLAYER_SLIM : ModelLayers.PLAYER), slim);
                 ObfuscationReflectionHelper.setPrivateValue(LivingEntityRenderer.class, playerRenderer, model, MODEL_FIELD);
+                playerRenderer.addLayer(new SlideCapeLayer(playerRenderer));
                 LOGGER.debug("Animación de deslizarse puesta en el modelo de jugador '{}'", skin);
             } catch (RuntimeException e) {
                 LOGGER.error("No se ha podido poner la animación de deslizarse en el modelo de jugador '{}'", skin, e);
