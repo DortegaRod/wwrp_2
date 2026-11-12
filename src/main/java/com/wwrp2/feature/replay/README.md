@@ -91,6 +91,10 @@ Ver [`PLAN.md`](PLAN.md): fase 0 grabador base, 1 grabador de zona, 2 rondas, 3 
   (login, mundo, hora, clima, jugadores y todo el terreno de la zona). Detalle, resultados y
   limitaciones en [`PLAN.md`](PLAN.md). Probado con jugador y **visto en Replay Mod (Fabric
   1.20.1): funciona.**
+- [x] **Scoreboard y vida (2026-11-13):** el replay incluye el estado inicial del scoreboard real
+  (equipos y objetivos visibles; los cambios ya se grababan) y la vida de cada jugador bajo su
+  nombre con un objetivo que solo existe en el replay. Detalle en [`PLAN.md`](PLAN.md). Falta
+  verlo con jugadores.
 - [ ] Fase 2: rondas. Fase 3: marcadores. Fase 4: visor en el servidor. Fase 5: escala.
 
 ## Cómo probar

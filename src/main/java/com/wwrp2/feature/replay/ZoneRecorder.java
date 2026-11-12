@@ -8,6 +8,9 @@ import com.wwrp2.feature.replay.mixin.TrackedEntityAccessor;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -22,14 +25,20 @@ import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheRadiusPacket;
 import net.minecraft.network.protocol.game.ClientboundSetDefaultSpawnPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket;
+import net.minecraft.network.protocol.game.ClientboundSetObjectivePacket;
+import net.minecraft.network.protocol.game.ClientboundSetPlayerTeamPacket;
+import net.minecraft.network.protocol.game.ClientboundSetScorePacket;
 import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
 import net.minecraft.network.protocol.game.ClientboundUpdateTagsPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.ServerScoreboard;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.TagNetworkSerialization;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.level.ChunkPos;
@@ -39,6 +48,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -46,6 +59,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -72,6 +86,12 @@ public final class ZoneRecorder {
     private static final int CHUNK_RADIUS = 32;
     /** Tiempo máximo por tick dedicado a mandar terreno al empezar, en nanosegundos. */
     private static final long TERRAIN_BUDGET_NANOS = 10_000_000L;
+    /**
+     * Objetivo de vida que solo existe en el replay (no en la partida real): se ve como "18 ❤" bajo
+     * el nombre de cada jugador. Nombre propio para no chocar con objetivos reales.
+     */
+    private static final Objective HEALTH = new Objective(new Scoreboard(), "wwrp2_vida", ObjectiveCriteria.DUMMY,
+            Component.literal("❤").withStyle(ChatFormatting.RED), ObjectiveCriteria.RenderType.INTEGER);
 
     private static volatile ZoneRecorder active;
 
@@ -81,6 +101,8 @@ public final class ZoneRecorder {
     private final Deque<ChunkPos> pendingTerrain = new ArrayDeque<>();
     private final int totalChunks;
     private final IntSet knownEntities = new IntOpenHashSet();
+    /** Última vida grabada de cada jugador (por nombre), para grabar solo los cambios. */
+    private final Object2IntMap<String> lastHealth = new Object2IntOpenHashMap<>();
     private volatile boolean terrainDone;
 
     private ZoneRecorder(ServerLevel level, ReplayZone zone, ReplayRecorder recorder) {
@@ -220,6 +242,29 @@ public final class ZoneRecorder {
         for (ServerPlayer player : players) {
             r.addPlayer(player.getUUID());
         }
+
+        recordScoreboard(server.getScoreboard());
+        r.recordPacket(new ClientboundSetObjectivePacket(HEALTH, ClientboundSetObjectivePacket.METHOD_ADD));
+        r.recordPacket(new ClientboundSetDisplayObjectivePacket(Scoreboard.DISPLAY_SLOT_BELOW_NAME, HEALTH));
+    }
+
+    /**
+     * Estado actual del scoreboard real, igual que lo recibe un jugador al entrar
+     * ({@code PlayerList.updateEntireScoreboard}). Los cambios posteriores ya se graban solos porque
+     * pasan por {@code PlayerList.broadcastAll}. Ojo: Minecraft solo envía los objetivos que se
+     * muestran en algún sitio (lateral, TAB o bajo el nombre).
+     */
+    private void recordScoreboard(ServerScoreboard scoreboard) {
+        for (PlayerTeam team : scoreboard.getPlayerTeams()) {
+            this.recorder.recordPacket(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
+        }
+        Set<Objective> shown = new HashSet<>();
+        for (int slot = 0; slot < Scoreboard.DISPLAY_SLOTS; slot++) {
+            Objective objective = scoreboard.getDisplayObjective(slot);
+            if (objective != null && shown.add(objective)) {
+                scoreboard.getStartTrackingPackets(objective).forEach(this.recorder::recordPacket);
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -239,6 +284,23 @@ public final class ZoneRecorder {
             return;
         }
         syncEntities();
+        syncHealth();
+    }
+
+    /** Graba la vida (en medios corazones, como el criterio "health" de vanilla) cuando cambia. */
+    private void syncHealth() {
+        for (ServerPlayer player : this.level.players()) {
+            if (!this.zone.containsBlock(player.getX(), player.getZ())) {
+                continue;
+            }
+            String name = player.getScoreboardName();
+            int health = Mth.ceil(player.getHealth());
+            if (!this.lastHealth.containsKey(name) || this.lastHealth.getInt(name) != health) {
+                this.lastHealth.put(name, health);
+                this.recorder.recordPacket(new ClientboundSetScorePacket(ServerScoreboard.Method.CHANGE,
+                        HEALTH.getName(), name, health));
+            }
+        }
     }
 
     private void sendTerrain() {

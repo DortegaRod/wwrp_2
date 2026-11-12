@@ -84,6 +84,20 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
    volar libremente. Queda por comprobar con el modpack completo en ReForgedPlay (contenido
    modded) y revisar en detalle explosiones y chat en una zona grande.
 
+10. **Scoreboard y vida (2026-11-13):**
+    - El scoreboard real ya se grababa durante la partida (pasa por `PlayerList.broadcastAll`).
+      Ahora también su estado al empezar: equipos y objetivos que se muestran (lateral, TAB, bajo
+      el nombre), igual que `PlayerList.updateEntireScoreboard`. Probado: entra al principio y los
+      cambios posteriores se graban solos.
+    - Minecraft **no envía** los objetivos que no se muestran en ningún sitio, así que esos no están
+      en el replay.
+    - **Vida de cada jugador** bajo su nombre («18 ❤», en medios corazones como el criterio `health`
+      de vanilla). Es un objetivo `wwrp2_vida` que **solo existe en el replay**, no en la partida
+      real. Se graba solo cuando la vida cambia. La armadura se descartó (no hay armaduras en el
+      evento). Si el scoreboard real usa el hueco «bajo el nombre», en el replay manda el nuestro
+      hasta que el real cambie.
+    - Pendiente de ver con jugadores: la vida no se puede probar sin ellos.
+
 **Limitaciones conocidas de la fase 1:**
 - `/say` y otros mensajes de chat «de sistema firmados» no se graban (sí el chat normal y las
   muertes). Se mira si hace falta.
