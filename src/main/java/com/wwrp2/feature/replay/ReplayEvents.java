@@ -4,6 +4,8 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
+import net.minecraft.commands.SharedSuggestionProvider;
 import com.wwrp2.Wwrp2;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -22,6 +24,10 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.stream.Stream;
 import java.util.List;
 
 /**
@@ -34,6 +40,7 @@ import java.util.List;
  * /replay start | stop                  graba la zona / para y guarda
  * /replay estado                        qué se está grabando
  * /replay jugador start|stop [jugador]  graba lo que ve un jugador concreto
+ * /replay ver &lt;archivo&gt;                 ver un replay dentro del servidor (solo fuera de ronda)
  * /replay marca nueva &lt;nombre&gt;          marcador ahora, donde mira el admin
  * /replay marca lista                   marcadores de la grabación en curso (con su número)
  * /replay marca editar &lt;n&gt; &lt;nombre&gt;     cambia el nombre del marcador n
@@ -58,6 +65,10 @@ public final class ReplayEvents {
                 .then(Commands.literal("start").executes(ReplayEvents::startZone))
                 .then(Commands.literal("stop").executes(ReplayEvents::stopZone))
                 .then(Commands.literal("estado").executes(ReplayEvents::status))
+                .then(Commands.literal("ver")
+                        .then(Commands.argument("archivo", StringArgumentType.word())
+                                .suggests(REPLAY_FILES)
+                                .executes(ReplayEvents::view)))
                 .then(Commands.literal("marca")
                         .then(Commands.literal("nueva")
                                 .then(Commands.argument("nombre", StringArgumentType.greedyString())
@@ -148,9 +159,50 @@ public final class ReplayEvents {
                     + zone.terrainPercent() + " %, " + zone.trackedEntities() + " entidades, "
                     + r.rawBytes() / 1024 + " KB sin comprimir, archivo " + r.getOutput().getFileName()), false);
         }
+        for (ReplayViewer v : ReplayViewer.all()) {
+            c.getSource().sendSuccess(() -> Component.literal("Visor: " + v.player().getGameProfile().getName()
+                    + " ve " + v.name() + " (" + ReplayViewer.time(v.position()) + ")"), false);
+        }
         for (ReplayRecorder r : ReplayManager.all()) {
             c.getSource().sendSuccess(() -> Component.literal("Jugador: " + r.getOutput().getFileName()
                     + " (" + r.elapsedMillis() / 1000 + " s)"), false);
+        }
+        return 1;
+    }
+
+    // --- Visor (fase 4) ---------------------------------------------------------------------------
+
+    /** Replays de zona y de ronda guardados ({@code replays/*.mcpr}), los más nuevos primero. */
+    private static final SuggestionProvider<CommandSourceStack> REPLAY_FILES = (c, builder) ->
+            SharedSuggestionProvider.suggest(replayFiles(c.getSource().getServer()), builder);
+
+    private static java.util.List<String> replayFiles(net.minecraft.server.MinecraftServer server) {
+        Path dir = ReplayManager.replaysDir(server);
+        if (!Files.isDirectory(dir)) {
+            return java.util.List.of();
+        }
+        try (Stream<Path> files = Files.list(dir)) {
+            return files.filter(p -> p.getFileName().toString().endsWith(".mcpr"))
+                    .sorted(Comparator.comparing((Path p) -> p.toFile().lastModified()).reversed())
+                    .map(p -> p.getFileName().toString().replaceFirst("[.]mcpr$", ""))
+                    .toList();
+        } catch (IOException e) {
+            return java.util.List.of();
+        }
+    }
+
+    private static int view(CommandContext<CommandSourceStack> c) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = c.getSource().getPlayerOrException();
+        Path dir = ReplayManager.replaysDir(c.getSource().getServer()).toAbsolutePath().normalize();
+        Path file = dir.resolve(StringArgumentType.getString(c, "archivo") + ".mcpr").normalize();
+        if (!file.getParent().equals(dir) || !Files.isRegularFile(file)) {
+            c.getSource().sendFailure(Component.literal("No existe ese replay. Mira las sugerencias de /replay ver."));
+            return 0;
+        }
+        String error = ReplayViewer.start(player, file);
+        if (error != null) {
+            c.getSource().sendFailure(Component.literal(error));
+            return 0;
         }
         return 1;
     }
@@ -284,10 +336,14 @@ public final class ReplayEvents {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         ReplayManager.stop(event.getEntity().getUUID());
+        if (event.getEntity() instanceof ServerPlayer player) {
+            ReplayViewer.onLogout(player);
+        }
     }
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
+        ReplayViewer.abortAll();
         ZoneRecorder.stop();
         ReplayManager.stopAll();
     }

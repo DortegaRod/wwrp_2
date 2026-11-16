@@ -50,7 +50,7 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 | **1. Grabador de zona** | Ver detalle abajo. | ✅ Hecho (2026-11-12). Probado con jugador y **visto en Replay Mod (Fabric 1.20.1)**: funciona |
 | **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | ✅ Hecho (2026-11-14). Probado sin jugadores |
 | **3. Marcadores** | Automáticos: kills, muertes y cambios de fase. Comandos de admin para listar, añadir, editar y borrar en la grabación en curso. Multikills y rachas, más adelante. | ✅ Hecho (2026-11-16). Kills sin probar con jugadores |
-| **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. | |
+| **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. Solo admins y fuera de ronda. | 🔧 Programado (2026-11-16), falta probarlo con cliente |
 | **4b. Controles** | Items en la barra: pausa/play, velocidad (0,5×–4×), ±10 s. Saltar aplicando el último estado (idea de Hypixel). | |
 | **4c. Highlights** | Menú de marcadores como capítulos para ir directo a cada kill. Seguir a un jugador en primera o tercera persona. | |
 | **4d. Ver en grupo** | Varios espectadores en la misma sesión; un líder controla. | |
@@ -144,6 +144,38 @@ del marcador encuadra la kill. Multikills y rachas quedan abiertos para el futur
   UTF-8, y si no las tildes saldrían rotas.
 - Probado con RCON: marcadores de fase, añadir, editar, borrar, número inexistente y `markers.json`
   final correcto (UTF-8). **Falta probar kills y muertes con jugadores.**
+
+### Detalle de la fase 4a: visor básico (2026-11-16)
+
+Decidido con Mistic: solo admins (permiso 2) y solo fuera de ronda; si empieza una ronda, quien
+esté viendo un replay vuelve solo al mundo. Diseño copiado de ServerReplay (MIT, rama 1.20.1),
+reescrito en Java para Forge y sin dependencias nuevas (`ReplayViewer`).
+
+- **Salir del mundo real:** se quita al espectador del nivel (como en un cambio de dimensión,
+  `removePlayerImmediately` + `revive`, así las capabilities de Forge siguen vivas) y de la lista de
+  jugadores. Los demás lo ven irse del TAB y desaparecer.
+- **Aislamiento con Netty, sin Mixin en la conexión:** un handler antes de `packet_handler` tira todo
+  lo que el servidor real le manda (menos keep-alive y desconexión) y todo lo que manda su cliente
+  (movimiento, clics, inventario, chat), salvo keep-alive, ajustes, canales de registro y los
+  comandos del visor.
+- **Reproducción:** un hilo propio lee `recording.tmcpr` del `.mcpr` y manda los paquetes ya
+  codificados directamente por debajo del `encoder`, con sus tiempos, velocidad y pausa. Se salta el
+  «Login Success». Si el cliente va lento (terreno inicial) espera en vez de llenar la memoria.
+- **UUID del espectador:** si sale en el replay (jugó esa ronda), se le cambia el UUID en la lista
+  de jugadores y al aparecer, porque el cliente no puede tener otra entidad con su propio UUID.
+- **Comandos dentro del visor** (los únicos que funcionan): `/replay pausa`, `/replay velocidad <x>`
+  (0,25–8), `/replay reiniciar` y `/replay salir`. Barra de jefe con nombre, tiempo, velocidad y pausa.
+- **Volver:** se manda lo mismo que `PlayerList.placeNewPlayer` (Join Game real, recetas, tags,
+  permisos y comandos, scoreboard, lista de jugadores, nivel, barras, efectos, inventario y vida)
+  sin crear otro jugador, y vuelve al sitio exacto.
+- **Desconectarse viendo un replay:** se limpia y el servidor guarda al jugador con la posición de
+  antes de entrar al replay.
+- **Ventaja frente a ReForgedPlay:** el cliente ya tiene los IDs del modpack de este servidor, así
+  que el riesgo del handshake de Forge no aplica.
+- **Pendiente de probar con cliente:** entrar, ver, pausar, velocidad, reiniciar, salir, que todo
+  vuelva bien (inventario, TAB, scoreboard, otros jugadores) y desconectarse viendo un replay.
+- **Riesgo:** mods que sincronizan datos al entrar o al cambiar de dimensión pueden no reenviarlos al
+  volver; se mira con el modpack completo.
 
 **Limitaciones conocidas de la fase 1:**
 - `/say` y otros mensajes de chat «de sistema firmados» no se graban (sí el chat normal y las

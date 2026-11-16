@@ -51,6 +51,9 @@ public final class ReplayRounds {
     }
 
     private static void startRound(MinecraftServer server, int round) {
+        // Los replays solo se ven fuera de ronda: quien esté viendo uno vuelve al mundo.
+        ReplayViewer.stopAll(Component.literal("Empieza la ronda " + round + ": has vuelto del replay.")
+                .withStyle(ChatFormatting.YELLOW));
         ReplayRecorder manual = ZoneRecorder.stop();
         if (manual != null) {
             tellAdmins(server, "Replay: paro la grabación manual (" + manual.getOutput().getFileName()

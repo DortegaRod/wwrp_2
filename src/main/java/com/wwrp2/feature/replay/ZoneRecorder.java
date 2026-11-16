@@ -270,16 +270,23 @@ public final class ZoneRecorder {
      * muestran en algún sitio (lateral, TAB o bajo el nombre).
      */
     private void recordScoreboard(ServerScoreboard scoreboard) {
+        scoreboardPackets(scoreboard).forEach(this.recorder::recordPacket);
+    }
+
+    /** Paquetes con el estado entero del scoreboard (también los usa el visor al devolver al jugador). */
+    static List<Packet<?>> scoreboardPackets(ServerScoreboard scoreboard) {
+        List<Packet<?>> packets = new ArrayList<>();
         for (PlayerTeam team : scoreboard.getPlayerTeams()) {
-            this.recorder.recordPacket(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
+            packets.add(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true));
         }
         Set<Objective> shown = new HashSet<>();
         for (int slot = 0; slot < Scoreboard.DISPLAY_SLOTS; slot++) {
             Objective objective = scoreboard.getDisplayObjective(slot);
             if (objective != null && shown.add(objective)) {
-                scoreboard.getStartTrackingPackets(objective).forEach(this.recorder::recordPacket);
+                packets.addAll(scoreboard.getStartTrackingPackets(objective));
             }
         }
+        return packets;
     }
 
     // ---------------------------------------------------------------------------------------------
