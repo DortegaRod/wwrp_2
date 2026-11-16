@@ -49,7 +49,7 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 | **0. Grabador base** | Handler de Netty tras el `encoder`, escritura en hilo aparte, `.mcpr`, comandos `/replay start\|stop\|list`. | ✅ Hecho (2026-11-11) |
 | **1. Grabador de zona** | Ver detalle abajo. | ✅ Hecho (2026-11-12). Probado con jugador y **visto en Replay Mod (Fabric 1.20.1)**: funciona |
 | **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | ✅ Hecho (2026-11-14). Probado sin jugadores |
-| **3. Marcadores** | Automáticos: kills, muertes, rachas, cambios de fase. Comandos de admin para listar, añadir, editar y borrar, en grabaciones en curso y ya guardadas (`markers.json`). | |
+| **3. Marcadores** | Automáticos: kills, muertes y cambios de fase. Comandos de admin para listar, añadir, editar y borrar en la grabación en curso. Multikills y rachas, más adelante. | ✅ Hecho (2026-11-16). Kills sin probar con jugadores |
 | **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. | |
 | **4b. Controles** | Items en la barra: pausa/play, velocidad (0,5×–4×), ±10 s. Saltar aplicando el último estado (idea de Hypixel). | |
 | **4c. Highlights** | Menú de marcadores como capítulos para ir directo a cada kill. Seguir a un jugador en primera o tercera persona. | |
@@ -113,6 +113,37 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
   el de fin de ronda sí.
 - Probado con RCON: manual → ronda (la manual se guarda), ronda completa, ronda cancelada y
   `/replay stop` a mitad de ronda. Todo con los archivos y nombres esperados.
+
+### Detalle de la fase 3: marcadores (2026-11-16)
+
+Decidido con Mistic: automáticos de kills, muertes sin asesino y cambios de fase; el admin solo
+edita la grabación en curso (los replays guardados se retocan en el propio Replay Mod); la cámara
+del marcador encuadra la kill. Multikills y rachas quedan abiertos para el futuro.
+
+- **Kills** (`ReplayMarkers`, `LivingDeathEvent` con prioridad mínima y sin cancelados): solo
+  jugadores muertos dentro de la zona. `Mistic → Pepe`. Si la muerte es indirecta (caída tras un
+  golpe, lava...), Minecraft se la atribuye al último jugador que pegó: `Mistic → Pepe (caída)`.
+- **Muertes sin jugador:** `Pepe murió (caída)` o `Pepe murió (Zombie)`. Las causas comunes están
+  en castellano; el resto sale con el id de Minecraft.
+- **Cámara de la kill:** 6 bloques por detrás y 3 por encima de la víctima, mirando a su pecho.
+- **Cambios de fase** (`ReplayRounds`): `Ronda 2: Preparación`, `Combate`, `Finalización` y
+  `terminada`/`cancelada`. Van a la posición inicial de la cámara. También en grabaciones manuales.
+- **Comandos:** `/replay marca nueva|lista|editar|borrar` (ver README). El marcador del admin se pone
+  donde está mirando él; desde consola, en la posición inicial de la cámara. Los números son los de
+  `lista` y se pueden editar y borrar también los automáticos.
+- **Colores** (`MarkerType`, pedido por Mistic): verde las fases (inicio, cambios, fin), rojo las
+  kills de jugador (directas o indirectas), naranja lo PvE (mobs y entorno) y azul los manuales.
+  El visor es **ReForgedPlay** (port de Replay Mod; Replay Mod en Fabric solo se usa para probar
+  mientras tanto). Ninguno de los dos **tiene color de marcador** (el `Marker` de Replay Mod solo guarda nombre, tiempo y posición), así
+  que el color va como código `§` al principio del nombre (Minecraft lo pinta al mostrar el texto)
+  y como campo propio `wwrp2_tipo`, que ReForgedPlay ignora y usará el visor de la fase 4. El icono
+  del marcador en la línea de tiempo sigue siendo igual para todos. Si Replay Mod reescribe los
+  marcadores (al editarlos en él), `wwrp2_tipo` se pierde pero el código del nombre se queda.
+- `markers.json` y `metaData.json` se escriben **solo en ASCII** (tildes y `§` como escapes
+  unicode de JSON, la «ó» se escribe `\u00f3`): Replay Mod (y por tanto ReForgedPlay) los lee con la codificación del sistema, que en Windows con Java 17 no es
+  UTF-8, y si no las tildes saldrían rotas.
+- Probado con RCON: marcadores de fase, añadir, editar, borrar, número inexistente y `markers.json`
+  final correcto (UTF-8). **Falta probar kills y muertes con jugadores.**
 
 **Limitaciones conocidas de la fase 1:**
 - `/say` y otros mensajes de chat «de sistema firmados» no se graban (sí el chat normal y las

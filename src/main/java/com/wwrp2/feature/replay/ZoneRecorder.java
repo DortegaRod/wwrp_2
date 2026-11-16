@@ -104,6 +104,8 @@ public final class ZoneRecorder {
     /** Última vida grabada de cada jugador (por nombre), para grabar solo los cambios. */
     private final Object2IntMap<String> lastHealth = new Object2IntOpenHashMap<>();
     private volatile boolean terrainDone;
+    /** Donde empieza la cámara del replay; los marcadores sin sitio propio apuntan aquí. */
+    private double cameraX, cameraY, cameraZ;
 
     private ZoneRecorder(ServerLevel level, ReplayZone zone, ReplayRecorder recorder) {
         this.level = level;
@@ -182,6 +184,16 @@ public final class ZoneRecorder {
         return this.zone;
     }
 
+    /** Marcador en un sitio concreto: al saltar a él en el visor, la cámara se pone ahí. */
+    public void addMarker(MarkerType type, String name, double x, double y, double z, float yaw, float pitch) {
+        this.recorder.addMarker(type, name, x, y, z, yaw, pitch);
+    }
+
+    /** Marcador sin sitio propio (cambios de fase): la cámara va a la posición inicial del replay. */
+    public void addMarker(MarkerType type, String name) {
+        this.recorder.addMarker(type, name, this.cameraX, this.cameraY, this.cameraZ, 0f, 45f);
+    }
+
     /** Porcentaje del terreno inicial ya grabado. */
     public int terrainPercent() {
         return 100 - (int) (100L * this.pendingTerrain.size() / Math.max(1, this.totalChunks));
@@ -224,6 +236,9 @@ public final class ZoneRecorder {
         int z = center.getMiddleBlockZ();
         int y = this.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z) + 20;
         r.recordPacket(new ClientboundPlayerPositionPacket(x + 0.5, y, z + 0.5, 0f, 45f, Set.of(), 0));
+        this.cameraX = x + 0.5;
+        this.cameraY = y;
+        this.cameraZ = z + 0.5;
 
         r.recordPacket(new ClientboundInitializeBorderPacket(this.level.getWorldBorder()));
         r.recordPacket(new ClientboundSetTimePacket(this.level.getGameTime(), this.level.getDayTime(),

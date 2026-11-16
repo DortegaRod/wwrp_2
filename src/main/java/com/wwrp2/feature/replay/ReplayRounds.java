@@ -15,7 +15,7 @@ import org.slf4j.Logger;
 /**
  * Fase 2: graba cada ronda sola. Empieza al pasar a Preparación y para cuando la ronda termina
  * (jugada entera o cortada con {@code /ronda parar}). El archivo se llama
- * {@code ronda-<N>_<fecha>.mcpr}.
+ * {@code ronda-<N>_<fecha>.mcpr}. Cada cambio de fase deja un marcador ({@code Ronda 2: Combate}).
  *
  * <p>La grabación de la ronda manda: si al empezar la ronda había una grabación manual de zona,
  * se para (se guarda) y empieza la de la ronda. Si durante la ronda un admin hace
@@ -34,10 +34,19 @@ public final class ReplayRounds {
     @SubscribeEvent
     public static void onRoundPhaseChange(RoundPhaseChangeEvent event) {
         MinecraftServer server = event.getServer();
+        int round = event.getRoundNumber();
         if (event.getRoundPhase() == RoundPhase.PREPARATION) {
-            startRound(server, event.getRoundNumber());
-        } else if (event.isRoundOver()) {
-            stopRound(server, event.getRoundNumber(), event.wasStopped());
+            startRound(server, round);
+        }
+        // Marcador de fase en la grabación que haya (de la ronda o manual), antes de pararla.
+        ZoneRecorder recording = ZoneRecorder.active();
+        if (recording != null) {
+            recording.addMarker(MarkerType.FASE, "Ronda " + round + ": " + (event.isRoundOver()
+                    ? (event.wasStopped() ? "cancelada" : "terminada")
+                    : event.getRoundPhase().displayName()));
+        }
+        if (event.isRoundOver()) {
+            stopRound(server, round, event.wasStopped());
         }
     }
 

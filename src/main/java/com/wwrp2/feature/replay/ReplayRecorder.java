@@ -57,7 +57,7 @@ public final class ReplayRecorder {
     public static final int WWRP2_FORMAT_VERSION = 1;
 
     /** Marcador de la línea de tiempo (tiempo en ms desde el inicio de la grabación). */
-    public record Marker(int time, String name, double x, double y, double z, float yaw, float pitch) {
+    public record Marker(int time, MarkerType type, String name, double x, double y, double z, float yaw, float pitch) {
     }
 
     private final String name;
@@ -188,8 +188,31 @@ public final class ReplayRecorder {
         this.attachedPlayer = player;
     }
 
-    public synchronized void addMarker(String name, double x, double y, double z, float yaw, float pitch) {
-        this.markers.add(new Marker(elapsedMillis(), name, x, y, z, yaw, pitch));
+    public synchronized void addMarker(MarkerType type, String name, double x, double y, double z, float yaw, float pitch) {
+        this.markers.add(new Marker(elapsedMillis(), type, name, x, y, z, yaw, pitch));
+    }
+
+    /** Copia de los marcadores, en el orden en que se añadieron (el índice es el que usan los comandos). */
+    public synchronized List<Marker> markers() {
+        return List.copyOf(this.markers);
+    }
+
+    /** Cambia el nombre del marcador {@code index}. Devuelve el marcador antiguo, o {@code null} si no existe. */
+    public synchronized Marker renameMarker(int index, String name) {
+        if (index < 0 || index >= this.markers.size()) {
+            return null;
+        }
+        Marker old = this.markers.get(index);
+        this.markers.set(index, new Marker(old.time(), old.type(), name, old.x(), old.y(), old.z(), old.yaw(), old.pitch()));
+        return old;
+    }
+
+    /** Borra el marcador {@code index}. Devuelve el borrado, o {@code null} si no existe. */
+    public synchronized Marker removeMarker(int index) {
+        if (index < 0 || index >= this.markers.size()) {
+            return null;
+        }
+        return this.markers.remove(index);
     }
 
     /** Cancela una grabación que no llegó a arrancar: cierra y borra el temporal sin crear el .mcpr. */
@@ -254,13 +277,31 @@ public final class ReplayRecorder {
             zip.closeEntry();
 
             zip.putNextEntry(new ZipEntry("metaData.json"));
-            zip.write(metaData().getBytes(StandardCharsets.UTF_8));
+            zip.write(asciiJson(metaData()));
             zip.closeEntry();
 
             zip.putNextEntry(new ZipEntry("markers.json"));
-            zip.write(markersJson().getBytes(StandardCharsets.UTF_8));
+            zip.write(asciiJson(markersJson()));
             zip.closeEntry();
         }
+    }
+
+    /**
+     * El JSON solo con ASCII (lo demás como escapes unicode de JSON). Replay Mod lee estos archivos con la
+     * codificación por defecto del sistema, que en Windows con Java 17 no es UTF-8: sin esto, las
+     * tildes y el {@code §} de los colores saldrían mal.
+     */
+    private static byte[] asciiJson(String json) {
+        StringBuilder out = new StringBuilder(json.length());
+        for (int i = 0; i < json.length(); i++) {
+            char ch = json.charAt(i);
+            if (ch < 128) {
+                out.append(ch);
+            } else {
+                out.append(String.format("\\u%04x", (int) ch));
+            }
+        }
+        return out.toString().getBytes(StandardCharsets.US_ASCII);
     }
 
     private String metaData() {
@@ -293,8 +334,10 @@ public final class ReplayRecorder {
             position.addProperty("roll", 0f);
             JsonObject value = new JsonObject();
             if (m.name() != null) {
-                value.addProperty("name", m.name());
+                // El código de color al principio hace que Replay Mod pinte el nombre de ese color.
+                value.addProperty("name", m.type().color() + m.name());
             }
+            value.addProperty("wwrp2_tipo", m.type().name());
             value.add("position", position);
             JsonObject entry = new JsonObject();
             entry.addProperty("realTimestamp", m.time());

@@ -67,6 +67,9 @@ Ver [`PLAN.md`](PLAN.md): fase 0 grabador base, 1 grabador de zona, 2 rondas, 3 
 | `/replay zona <x1 z1> <x2 z2>` | Define la zona (dos esquinas, máximo 64 chunks por lado) |
 | `/replay start` / `/replay stop` | Graba la zona / para y guarda en `replays/zona_<fecha>.mcpr` |
 | `/replay estado` | Qué se está grabando: tiempo, % de terreno, entidades, tamaño |
+| `/replay marca nueva <nombre>` | Marcador ahora, con la cámara donde mira el admin |
+| `/replay marca lista` | Marcadores de la grabación en curso, con número y minuto |
+| `/replay marca editar <n> <nombre>` / `borrar <n>` | Cambia el nombre o borra el marcador `n` (también los automáticos) |
 | *(automático)* | Con la feature `rondas`: graba cada ronda en `replays/ronda-<N>_<fecha>.mcpr` |
 | `/replay jugador start\|stop [jugador]` | Graba lo que ve un jugador concreto (`replays/jugadores/`) |
 
@@ -100,7 +103,12 @@ Ver [`PLAN.md`](PLAN.md): fase 0 grabador base, 1 grabador de zona, 2 rondas, 3 
   ronda (jugada o cancelada), en `replays/ronda-<N>_<fecha>.mcpr`. Si había una grabación manual,
   se guarda y empieza la de la ronda. Hace falta tener la zona definida; si no, los OP reciben un
   aviso en rojo. Probado sin jugadores. Detalle en [`PLAN.md`](PLAN.md).
-- [ ] Fase 3: marcadores. Fase 4: visor en el servidor. Fase 5: escala.
+- [x] **Fase 3: marcadores (2026-11-16):** automáticos de kills (`Mistic → Pepe`), muertes sin
+  asesino (`Pepe murió (caída)`) y cambios de fase, con la cámara encuadrando la kill. El admin
+  añade, edita y borra en la grabación en curso. Kills probadas con dos clientes. Colores: verde
+  fases, rojo kills, naranja PvE, azul manuales (en ReForgedPlay / Replay Mod solo se colorea el nombre).
+  Detalle en [`PLAN.md`](PLAN.md).
+- [ ] Multikills y rachas (abierto para el futuro). Fase 4: visor en el servidor. Fase 5: escala.
 
 ## Cómo probar
 
@@ -136,8 +144,8 @@ Hasta la fase 4 (visor en el servidor) solo se puede ver con un visor externo.
 - [x] ~~Diseñar el esqueleto del grabador.~~ Hecho en el paso 1.
 - [x] ~~Paso 2: estado inicial.~~ Hecho dentro de la fase 1 (grabador de zona).
 - [ ] Probar el `.mcpr` en ReForgedPlay y comprobar que muestra los marcadores de `markers.json`.
-- [ ] Decidir qué eventos de partida cuentan como highlight y su prioridad.
-- [ ] Definir la sintaxis de los comandos de admin para marcadores y sus permisos.
+- [x] ~~Decidir qué eventos cuentan como highlight y los comandos de marcadores.~~ Hecho en la fase 3.
+- [ ] Probar kills y muertes con jugadores reales y ver los marcadores en Replay Mod.
 - [x] ~~Fase 2: arrancar y parar solo con la feature `rondas`.~~ Hecho el 2026-11-14.
 - [ ] Probar con ~20 jugadores: tamaño de archivo, carga del servidor y disco.
 - [ ] Política de almacenamiento: dónde se guardan los replays y cuándo se borran los viejos.

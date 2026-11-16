@@ -1,6 +1,8 @@
 package com.wwrp2.feature.replay;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.wwrp2.Wwrp2;
 import net.minecraft.commands.CommandSourceStack;
@@ -10,6 +12,7 @@ import net.minecraft.commands.arguments.coordinates.ColumnPosArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ColumnPos;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.event.TickEvent;
@@ -19,6 +22,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Comandos {@code /replay} (permiso 2) y eventos: tick de la grabación de zona, chat y limpieza al
@@ -30,6 +34,10 @@ import java.io.IOException;
  * /replay start | stop                  graba la zona / para y guarda
  * /replay estado                        qué se está grabando
  * /replay jugador start|stop [jugador]  graba lo que ve un jugador concreto
+ * /replay marca nueva &lt;nombre&gt;          marcador ahora, donde mira el admin
+ * /replay marca lista                   marcadores de la grabación en curso (con su número)
+ * /replay marca editar &lt;n&gt; &lt;nombre&gt;     cambia el nombre del marcador n
+ * /replay marca borrar &lt;n&gt;              borra el marcador n
  * </pre>
  */
 @Mod.EventBusSubscriber(modid = Wwrp2.MOD_ID)
@@ -50,6 +58,18 @@ public final class ReplayEvents {
                 .then(Commands.literal("start").executes(ReplayEvents::startZone))
                 .then(Commands.literal("stop").executes(ReplayEvents::stopZone))
                 .then(Commands.literal("estado").executes(ReplayEvents::status))
+                .then(Commands.literal("marca")
+                        .then(Commands.literal("nueva")
+                                .then(Commands.argument("nombre", StringArgumentType.greedyString())
+                                        .executes(ReplayEvents::addMarker)))
+                        .then(Commands.literal("lista").executes(ReplayEvents::listMarkers))
+                        .then(Commands.literal("editar")
+                                .then(Commands.argument("n", IntegerArgumentType.integer(1))
+                                        .then(Commands.argument("nombre", StringArgumentType.greedyString())
+                                                .executes(ReplayEvents::renameMarker))))
+                        .then(Commands.literal("borrar")
+                                .then(Commands.argument("n", IntegerArgumentType.integer(1))
+                                        .executes(ReplayEvents::removeMarker))))
                 .then(Commands.literal("jugador")
                         .then(Commands.literal("start")
                                 .executes(c -> startPlayer(c, c.getSource().getPlayerOrException()))
@@ -133,6 +153,91 @@ public final class ReplayEvents {
                     + " (" + r.elapsedMillis() / 1000 + " s)"), false);
         }
         return 1;
+    }
+
+    // --- Marcadores (solo la grabación de zona en curso) -------------------------------------------
+
+    private static ZoneRecorder recordingOrFail(CommandContext<CommandSourceStack> c) {
+        ZoneRecorder zone = ZoneRecorder.active();
+        if (zone == null) {
+            c.getSource().sendFailure(Component.literal("No hay ninguna grabación de zona en marcha."));
+        }
+        return zone;
+    }
+
+    private static int addMarker(CommandContext<CommandSourceStack> c) {
+        ZoneRecorder zone = recordingOrFail(c);
+        if (zone == null) {
+            return 0;
+        }
+        String name = StringArgumentType.getString(c, "nombre");
+        // Desde un jugador en el Overworld: la cámara del marcador es lo que él ve. Desde consola: el
+        // sitio inicial de la cámara del replay.
+        if (c.getSource().getEntity() instanceof ServerPlayer player && player.level().dimension() == Level.OVERWORLD) {
+            zone.addMarker(MarkerType.MANUAL, name, player.getX(), player.getEyeY(), player.getZ(), player.getYRot(), player.getXRot());
+        } else {
+            zone.addMarker(MarkerType.MANUAL, name);
+        }
+        int n = zone.recorder().markers().size();
+        c.getSource().sendSuccess(() -> Component.literal("Marcador " + n + " añadido: " + name), true);
+        return 1;
+    }
+
+    private static int listMarkers(CommandContext<CommandSourceStack> c) {
+        ZoneRecorder zone = recordingOrFail(c);
+        if (zone == null) {
+            return 0;
+        }
+        List<ReplayRecorder.Marker> markers = zone.recorder().markers();
+        if (markers.isEmpty()) {
+            c.getSource().sendSuccess(() -> Component.literal("La grabación no tiene marcadores."), false);
+            return 1;
+        }
+        for (int i = 0; i < markers.size(); i++) {
+            ReplayRecorder.Marker m = markers.get(i);
+            Component line = Component.literal((i + 1) + ". [" + time(m.time()) + "] ")
+                    .append(Component.literal(m.name()).withStyle(m.type().color()));
+            c.getSource().sendSuccess(() -> line, false);
+        }
+        return markers.size();
+    }
+
+    private static int renameMarker(CommandContext<CommandSourceStack> c) {
+        ZoneRecorder zone = recordingOrFail(c);
+        if (zone == null) {
+            return 0;
+        }
+        int n = IntegerArgumentType.getInteger(c, "n");
+        String name = StringArgumentType.getString(c, "nombre");
+        ReplayRecorder.Marker old = zone.recorder().renameMarker(n - 1, name);
+        if (old == null) {
+            c.getSource().sendFailure(Component.literal("No existe el marcador " + n + " (mira /replay marca lista)."));
+            return 0;
+        }
+        c.getSource().sendSuccess(() -> Component.literal("Marcador " + n + ": «" + old.name() + "» → «" + name + "»"), true);
+        return 1;
+    }
+
+    private static int removeMarker(CommandContext<CommandSourceStack> c) {
+        ZoneRecorder zone = recordingOrFail(c);
+        if (zone == null) {
+            return 0;
+        }
+        int n = IntegerArgumentType.getInteger(c, "n");
+        ReplayRecorder.Marker old = zone.recorder().removeMarker(n - 1);
+        if (old == null) {
+            c.getSource().sendFailure(Component.literal("No existe el marcador " + n + " (mira /replay marca lista)."));
+            return 0;
+        }
+        c.getSource().sendSuccess(() -> Component.literal("Marcador " + n + " borrado: " + old.name()
+                + ". Los siguientes bajan un número."), true);
+        return 1;
+    }
+
+    /** Milisegundos desde el inicio como m:ss. */
+    private static String time(int millis) {
+        int seconds = millis / 1000;
+        return seconds / 60 + ":" + String.format("%02d", seconds % 60);
     }
 
     // --- Jugador concreto -------------------------------------------------------------------------
