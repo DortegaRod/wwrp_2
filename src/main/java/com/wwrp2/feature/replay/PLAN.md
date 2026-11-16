@@ -48,7 +48,7 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 |---|---|---|
 | **0. Grabador base** | Handler de Netty tras el `encoder`, escritura en hilo aparte, `.mcpr`, comandos `/replay start\|stop\|list`. | ✅ Hecho (2026-11-11) |
 | **1. Grabador de zona** | Ver detalle abajo. | ✅ Hecho (2026-11-12). Probado con jugador y **visto en Replay Mod (Fabric 1.20.1)**: funciona |
-| **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | |
+| **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | ✅ Hecho (2026-11-14). Probado sin jugadores |
 | **3. Marcadores** | Automáticos: kills, muertes, rachas, cambios de fase. Comandos de admin para listar, añadir, editar y borrar, en grabaciones en curso y ya guardadas (`markers.json`). | |
 | **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. | |
 | **4b. Controles** | Items en la barra: pausa/play, velocidad (0,5×–4×), ±10 s. Saltar aplicando el último estado (idea de Hypixel). | |
@@ -97,6 +97,22 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
       evento). Si el scoreboard real usa el hueco «bajo el nombre», en el replay manda el nuestro
       hasta que el real cambie.
     - Pendiente de ver con jugadores: la vida no se puede probar sin ellos.
+
+### Detalle de la fase 2: rondas (2026-11-14)
+
+- `ReplayRounds` escucha `RoundPhaseChangeEvent` de la feature `rondas` (sin tocar `rondas`).
+- **Empieza** al pasar a Preparación con el archivo `ronda-<N>_<fecha>.mcpr`. **Para** cuando la
+  ronda termina, tanto si se juega entera como si se corta con `/ronda parar`.
+- **La ronda manda:** si había una grabación manual de zona, se para (queda guardada) y empieza la de
+  la ronda.
+- Si un admin hace `/replay stop` a mitad de ronda, se respeta: al terminar la ronda no se toca nada,
+  aunque haya otra grabación manual en marcha.
+- Avisos en el chat solo para los OP: «grabando la ronda N», «guardándose en …» y, en rojo, si no se
+  puede grabar (por ejemplo, porque no hay zona definida). Esos avisos no salen en el replay.
+- El anuncio «[Ronda N] Preparación» no sale en el replay (se manda justo antes de empezar a grabar);
+  el de fin de ronda sí.
+- Probado con RCON: manual → ronda (la manual se guarda), ronda completa, ronda cancelada y
+  `/replay stop` a mitad de ronda. Todo con los archivos y nombres esperados.
 
 **Limitaciones conocidas de la fase 1:**
 - `/say` y otros mensajes de chat «de sistema firmados» no se graban (sí el chat normal y las
