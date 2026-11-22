@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.wwrp2.feature.replay.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "wwrp2.refmap.json",
+  "mixins": [
+    "ChunkHolderMixin",
+    "ChunkMapAccessor",
+    "PlayerListAccessor",
+    "PlayerListMixin",
+    "ServerLevelMixin",
+    "TrackedEntityAccessor",
+    "TrackedEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
