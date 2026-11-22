@@ -77,6 +77,8 @@ public final class ReplayRecorder {
 
     private volatile boolean stopped;
     private volatile int lastTimestamp;
+    /** Tiempo en el que acabó de grabarse el terreno inicial (-1 si no aplica o no ha acabado). */
+    private volatile int terrainReady = -1;
     private ServerPlayer attachedPlayer;
 
     public ReplayRecorder(Path directory, String fileName) throws IOException {
@@ -89,6 +91,11 @@ public final class ReplayRecorder {
 
     public Path getOutput() {
         return this.output;
+    }
+
+    /** El terreno inicial ya está grabado entero (lo llama el grabador de zona). */
+    public void markTerrainReady() {
+        this.terrainReady = this.lastTimestamp;
     }
 
     public int elapsedMillis() {
@@ -309,6 +316,10 @@ public final class ReplayRecorder {
         meta.addProperty("singleplayer", false);
         meta.addProperty("serverName", "wwrp-2");
         meta.addProperty("duration", this.lastTimestamp);
+        if (this.terrainReady >= 0) {
+            // Propio de wwrp2: el visor no deja saltar a antes de esto (se vería el vacío).
+            meta.addProperty("wwrp2_terrenoListo", this.terrainReady);
+        }
         meta.addProperty("date", this.startMillis);
         meta.addProperty("mcversion", SharedConstants.getCurrentVersion().getName());
         meta.addProperty("fileFormat", "MCPR");

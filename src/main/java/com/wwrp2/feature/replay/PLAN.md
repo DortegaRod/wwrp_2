@@ -50,9 +50,10 @@ distancias. Es el enfoque de ServerReplay (MIT), que usamos como referencia.
 | **1. Grabador de zona** | Ver detalle abajo. | ✅ Hecho (2026-11-12). Probado con jugador y **visto en Replay Mod (Fabric 1.20.1)**: funciona |
 | **2. Rondas** | Arranca solo al pasar a Preparación y para al terminar la ronda (`RoundPhaseChangeEvent`). Archivos `ronda-N_fecha.mcpr`. Los comandos manuales se mantienen. | ✅ Hecho (2026-11-14). Probado sin jugadores |
 | **3. Marcadores** | Automáticos: kills, muertes y cambios de fase. Comandos de admin para listar, añadir, editar y borrar en la grabación en curso. Multikills y rachas, más adelante. | ✅ Hecho (2026-11-16). Kills sin probar con jugadores |
-| **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. Solo admins y fuera de ronda. | 🔧 Programado (2026-11-16), falta probarlo con cliente |
-| **4b. Controles** | Items en la barra: pausa/play, velocidad (0,5×–4×), ±10 s. Saltar aplicando el último estado (idea de Hypixel). | |
-| **4c. Highlights** | Menú de marcadores como capítulos para ir directo a cada kill. Seguir a un jugador en primera o tercera persona. | |
+| **4a. Visor básico** | `/replay ver <archivo>`. Aislar al espectador del mundo real, mandarle el replay con sus tiempos y ponerlo en vuelo libre. Al salir, volver a su sitio en el mundo real. Solo admins y fuera de ronda. | 🔧 Probado con cliente (2026-11-22); falta probar la barra con highlights |
+| **4b. Saltar en el tiempo** | Comandos para ir a un tiempo, a un highlight, retroceder y avanzar sin reiniciar. Hacia atrás: empezar de cero y avanzar rápido hasta el tiempo (idea de Hypixel). | 🔧 Programado (2026-11-22), falta probarlo |
+| **4c. Menú gráfico** | Pantalla propia del mod (tecla J o `/replay menu`): línea de tiempo con los highlights en color (clic para saltar), controles, lista de highlights y lista de jugadores (clic para llevar la cámara a uno). | 🔧 Programado (2026-11-22), falta probarlo |
+| **4c+. Seguir a un jugador** | Ver desde los ojos de un jugador del replay y seguirlo (POV). Atajos de teclado en el menú. | 🔧 Programado (2026-11-23), falta probarlo |
 | **4d. Ver en grupo** | Varios espectadores en la misma sesión; un líder controla. | |
 | **5. Escala** | Prueba con ~20 jugadores: tamaño, CPU y disco. Política de borrado de replays viejos. Más compresión solo si los números lo piden. | |
 | **Extra** | Comprobar que el `.mcpr` abre en ReForgedPlay con el modpack completo (vídeos cinematográficos). Ya abre en Replay Mod original (Fabric). | Cuando se pueda |
@@ -164,7 +165,14 @@ reescrito en Java para Forge y sin dependencias nuevas (`ReplayViewer`).
 - **UUID del espectador:** si sale en el replay (jugó esa ronda), se le cambia el UUID en la lista
   de jugadores y al aparecer, porque el cliente no puede tener otra entidad con su propio UUID.
 - **Comandos dentro del visor** (los únicos que funcionan): `/replay pausa`, `/replay velocidad <x>`
-  (0,25–8), `/replay reiniciar` y `/replay salir`. Barra de jefe con nombre, tiempo, velocidad y pausa.
+  (0,25–8), `/replay reiniciar` y `/replay salir`.
+- **Barra de tiempo con highlights:** el título de la barra de jefe es una línea de 91 rayas `|` (2 px
+  cada una, el mismo ancho que la barra) con los marcadores del `markers.json` en su color (si caen
+  varios en la misma raya: kill > PvE > manual > fase); lo ya visto en gris claro. Nombre, tiempo,
+  velocidad y pausa van en la barra de acción. Al pasar por un marcador se escribe en el chat.
+- **Volver al mundo (arreglado):** el cliente, con un segundo Join Game, crea un mundo nuevo pero
+  reutiliza el jugador local, que seguía en el mundo anterior (bloques invisibles, no poder golpear).
+  Tras cada Join Game se manda un respawn a la misma dimensión, que crea un jugador local nuevo.
 - **Volver:** se manda lo mismo que `PlayerList.placeNewPlayer` (Join Game real, recetas, tags,
   permisos y comandos, scoreboard, lista de jugadores, nivel, barras, efectos, inventario y vida)
   sin crear otro jugador, y vuelve al sitio exacto.
@@ -186,6 +194,49 @@ reescrito en Java para Forge y sin dependencias nuevas (`ReplayViewer`).
 - El mapa debe estar ya generado: al empezar se cargan todos los chunks de la zona (≈10 ms por tick).
 - Contenido modded: los IDs de bloques e items de otros mods dependen del registro de Forge; el
   replay no incluye el handshake de Forge. Hay que comprobarlo al probar con el modpack completo.
+
+### Detalle de las fases 4b y 4c: saltar en el tiempo y menú (2026-11-22)
+
+- **Comandos nuevos dentro del visor:** `/replay ir <m:ss o segundos>`, `/replay atras [s]` y
+  `/replay adelante [s]` (10 s si no se pone nada), `/replay highlights` (lista en el chat; clic en
+  uno para ir) y `/replay highlight <n>`. `/replay reiniciar` es ahora un salto a 0:00.
+- **Cómo se salta:** hacia delante se mandan los paquetes que faltan sin esperar. Hacia atrás no se
+  puede deshacer lo que el cliente ya tiene, así que el replay vuelve a empezar (otro Join Game del
+  replay) y avanza rápido hasta el tiempo pedido: el estado final es el mismo que viéndolo entero.
+  Durante el salto, la barra de acción dice «saltando a m:ss...» y no se anuncian highlights.
+- **Cámara:** al ir a un highlight se pone la cámara que guardó el marcador (encuadrando la kill).
+  Al saltar hacia atrás a un tiempo, la cámara vuelve a donde estaba (el visor recuerda la última
+  posición que manda el cliente).
+- **Menú (pantalla del mod):** se abre con la tecla **J** (se puede cambiar en Controles) o con
+  `/replay menu`. Tiene la línea de tiempo (clic para saltar; clic sobre una raya de color para ir
+  a ese highlight; al pasar el ratón dice el tiempo o el highlight), botones de ±10 s, pausa,
+  velocidad, inicio y salir, y la lista de highlights con rueda. No para el replay.
+- **Red:** canal propio `wwrp2:replay` con un solo paquete de bajada (`ReplayStatePacket`, cada medio
+  segundo). Los botones mandan comandos normales del visor, así que no hay paquete de subida. Si el
+  salto hacia atrás tapa el menú con la pantalla de carga, se vuelve a abrir al terminar.
+- **Al cambiar el canal**, cliente y servidor tienen que llevar la misma versión del mod.
+- **Ir a un jugador:** `/replay jugadores` (lista con clic) y `/replay jugador <nombre>`, y la columna
+  «Jugadores» del menú. El visor sigue la posición de los jugadores del replay leyendo los paquetes
+  que manda (aparecer, moverse, teletransportarse, desaparecer) y pone la cámara 4 bloques detrás y
+  2 por encima, mirándolo. La lista solo tiene a los que están en ese momento en la zona.
+- **POV (seguir a un jugador):** `/replay seguir <nombre>`, o clic derecho sobre el jugador en el
+  menú. Usa la cámara de espectador de Minecraft (`ClientboundSetCameraPacket` con el id de
+  entidad del replay). Se suelta agachándose (shift), con `/replay dejar`, con otro clic derecho, al
+  ir a un jugador o a un highlight; la cámara libre se queda en sus ojos. Si el jugador muere o sale
+  de la zona, la cámara se suelta donde estaba y se le vuelve a seguir cuando reaparece (también
+  tras un salto hacia atrás).
+- **Atajos con el menú abierto:** espacio pausa/sigue, R reinicia, A/D retrocede/avanza 10 s, la
+  rueda cambia la velocidad (encima de las listas las mueve) y J cierra el menú.
+- **No se salta a antes del terreno (arreglado):** el terreno inicial se graba poco a poco durante
+  los primeros ticks. Saltar a 0:00 (p. ej. al highlight de inicio de ronda) con el replay en pausa
+  dejaba la cámara en el vacío. El grabador guarda en `metaData.json` cuándo terminó el terreno
+  (`wwrp2_terrenoListo`) y los saltos nunca van a antes. Los replays viejos no lo tienen.
+- **Error de Forge en cada Join Game (arreglado):** Forge mete sus filtros de red en cada login y,
+  al ya estar, fallaba (`Duplicate handler name: forge:forge_fixes`) y se saltaba el final del
+  login. El cliente los quita justo antes (`ClientPlayerNetworkEvent.LoggingIn`).
+- **Pendiente:** el nombre de la tecla sale como `key.wwrp2.replay_menu` en Controles porque el mod
+  no tiene archivo de idioma (añadirlo es un recurso compartido). Saltar hacia atrás en replays
+  muy largos puede tardar unos segundos; se mide en la fase 5.
 
 ## Decisiones pendientes
 

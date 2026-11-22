@@ -1,6 +1,11 @@
 package com.wwrp2.feature.replay;
 
 import com.google.gson.Gson;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
@@ -55,6 +60,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraftforge.network.NetworkDirection;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -93,10 +102,21 @@ public final class ReplayViewer {
     private static final Set<String> ALLOWED_CHANNELS = Set.of("minecraft:register", "minecraft:unregister", "minecraft:brand");
     private static final float MIN_SPEED = 0.25f;
     private static final float MAX_SPEED = 8f;
+    private static final String HELP = "/replay menu, pausa, velocidad <x>, ir <m:ss>, atras [s], adelante [s], "
+            + "highlights, highlight <n>, jugadores, jugador <nombre>, seguir <nombre>, dejar, reiniciar, salir.";
 
     private static final int ID_PLAYER_INFO_UPDATE = packetId(new ClientboundPlayerInfoUpdatePacket(
             EnumSet.noneOf(ClientboundPlayerInfoUpdatePacket.Action.class), List.of()));
     private static final int ID_PLAYER_INFO_REMOVE = packetId(new ClientboundPlayerInfoRemovePacket(List.of()));
+    /** Rayas de la línea de tiempo: con 2 px cada una, ocupa lo mismo que la barra (182 px). */
+    private static final int TIMELINE_SLOTS = 91;
+    private static final double EYE_HEIGHT = 1.62;
+    private static final int ID_MOVE_POS = packetId(new ClientboundMoveEntityPacket.Pos(0, (short) 0, (short) 0, (short) 0, false));
+    private static final int ID_MOVE_POS_ROT = packetId(new ClientboundMoveEntityPacket.PosRot(0, (short) 0, (short) 0, (short) 0,
+            (byte) 0, (byte) 0, false));
+    private static final int ID_MOVE_ROT = packetId(new ClientboundMoveEntityPacket.Rot(0, (byte) 0, (byte) 0, false));
+    private static final int ID_REMOVE_ENTITIES = packetId(new ClientboundRemoveEntitiesPacket(0));
+    private static final int ID_TELEPORT_ENTITY = packetId(teleportEntityPacket());
     private static final int ID_ADD_PLAYER = packetId(addPlayerPacket(0, new UUID(0, 0), 0, 0, 0, (byte) 0, (byte) 0));
 
     private final ServerPlayer player;
@@ -104,6 +124,23 @@ public final class ReplayViewer {
     private final Path file;
     private final String name;
     private final int duration;
+    /**
+     * Antes de este tiempo el terreno inicial no ha llegado entero: no se salta a antes, o la cámara
+     * se quedaría en el vacío (sobre todo con el replay en pausa).
+     */
+    private final int terrainReady;
+    /** Jugadores del replay por id de entidad, con su última posición (para llevar la cámara a ellos). */
+    private final Map<Integer, Tracked> tracked = new ConcurrentHashMap<>();
+    /** Nombres de los jugadores del replay por UUID (de la lista de jugadores). */
+    private final Map<UUID, String> replayNames = new ConcurrentHashMap<>();
+    /** Jugador al que se sigue en primera persona (null si no), y su id de entidad actual (-1 si no está). */
+    private volatile String followName;
+    private volatile int followId = -1;
+    /** Marcadores del replay, ordenados por tiempo. */
+    private final List<Highlight> highlights;
+    /** Siguiente marcador que se anunciará en el chat al pasar por él. */
+    private int nextHighlight;
+    private long lastHudNanos;
     private final ServerBossEvent bossbar;
     private final CommandDispatcher<ReplayViewer> commands = new CommandDispatcher<>();
     /** UUIDs que el replay ha metido en la lista de jugadores del cliente, para quitarlos al salir. */
@@ -117,14 +154,29 @@ public final class ReplayViewer {
     private volatile float speed = 1f;
     /** Milisegundos del replay que ya se han mandado. */
     private volatile int position;
+    /** Tiempo al que se está saltando (-1 si no). Se avanza mandando los paquetes sin esperar. */
+    private volatile int seekTarget = -1;
+    /** Al terminar el salto, poner la cámara aquí (al saltar a un highlight). */
+    private volatile Highlight seekCamera;
+    /** Al terminar un salto que ha vuelto a empezar el replay, devolver la cámara a donde estaba. */
+    private volatile boolean seekKeepCamera;
+    /** Este paso del replay ha empezado de cero por un salto hacia atrás. */
+    private boolean seekRestarted;
+    private boolean helpShown;
+    /** Última posición que ha mandado el cliente (para no perder la cámara al saltar hacia atrás). */
+    private volatile double clientX, clientY, clientZ;
+    private volatile float clientYaw, clientPitch;
+    private volatile boolean hasClientPos;
 
-    private ReplayViewer(ServerPlayer player, Path file, int duration) {
+    private ReplayViewer(ServerPlayer player, Path file, int duration, int terrainReady, List<Highlight> highlights) {
         this.player = player;
         this.server = player.server;
         this.file = file;
         String fileName = file.getFileName().toString();
         this.name = fileName.endsWith(".mcpr") ? fileName.substring(0, fileName.length() - 5) : fileName;
         this.duration = Math.max(1, duration);
+        this.highlights = highlights;
+        this.terrainReady = Math.min(terrainReady, this.duration);
         this.bossbar = new ServerBossEvent(Component.literal(this.name), BossEvent.BossBarColor.GREEN,
                 BossEvent.BossBarOverlay.PROGRESS);
         registerCommands();
@@ -153,19 +205,24 @@ public final class ReplayViewer {
             return "El anfitrión de un mundo singleplayer/LAN no puede ver replays (usa un servidor dedicado).";
         }
         int duration;
+        int terrainReady;
+        List<Highlight> highlights;
         try (ZipFile zip = new ZipFile(file.toFile())) {
             ZipEntry meta = zip.getEntry("metaData.json");
             if (zip.getEntry("recording.tmcpr") == null || meta == null) {
                 return "El archivo no es un replay válido.";
             }
             try (InputStreamReader reader = new InputStreamReader(zip.getInputStream(meta), StandardCharsets.UTF_8)) {
-                duration = new Gson().fromJson(reader, JsonObject.class).get("duration").getAsInt();
+                JsonObject metaData = new Gson().fromJson(reader, JsonObject.class);
+                duration = metaData.get("duration").getAsInt();
+                terrainReady = metaData.has("wwrp2_terrenoListo") ? metaData.get("wwrp2_terrenoListo").getAsInt() : 0;
             }
+            highlights = readHighlights(zip);
         } catch (IOException | RuntimeException e) {
             LOGGER.error("Replay: no se pudo abrir {}", file, e);
             return "No se pudo abrir el replay (mira el log del servidor).";
         }
-        ReplayViewer viewer = new ReplayViewer(player, file, duration);
+        ReplayViewer viewer = new ReplayViewer(player, file, duration, terrainReady, highlights);
         VIEWERS.put(player.getUUID(), viewer);
         viewer.enter();
         LOGGER.info("Replay: {} está viendo {}", player.getGameProfile().getName(), file.getFileName());
@@ -253,6 +310,7 @@ public final class ReplayViewer {
         }
         stopThread();
         // Quitar lo del replay que el "Join Game" del mundo real no borra.
+        send(ReplayNetwork.CHANNEL.toVanillaPacket(ReplayStatePacket.INACTIVE, NetworkDirection.PLAY_TO_CLIENT));
         send(new ClientboundPlayerInfoRemovePacket(new ArrayList<>(this.replayPlayers)));
         send(ClientboundBossEventPacket.createRemovePacket(this.bossbar.getId()));
         flush();
@@ -367,13 +425,18 @@ public final class ReplayViewer {
             this.replayPlayers.clear();
         }
         this.position = 0;
+        this.nextHighlight = 0;
+        this.tracked.clear();
+        this.replayNames.clear();
+        this.followId = -1;
+        this.seekRestarted = this.seekTarget >= 0;
         try (ZipFile zip = new ZipFile(this.file.toFile());
              DataInputStream in = new DataInputStream(new BufferedInputStream(
                      zip.getInputStream(zip.getEntry("recording.tmcpr")), 1 << 16))) {
             long lastNanos = System.nanoTime();
             double clock = 0; // ms de replay transcurridos
             int index = 0;
-            int lastBossbar = -1000;
+            packets:
             while (this.running && !this.restartRequested) {
                 int time;
                 try {
@@ -386,38 +449,60 @@ public final class ReplayViewer {
                 if (index++ == 0) {
                     continue; // "Login Success": es de la fase de login, no se puede mandar en juego.
                 }
-                // Esperar a que le toque, al ritmo de la velocidad y respetando la pausa.
-                if (time > clock) {
-                    flush();
-                    while (time > clock && this.running && !this.restartRequested) {
-                        long now = System.nanoTime();
-                        if (!this.paused) {
-                            clock += (now - lastNanos) / 1_000_000.0 * this.speed;
+                // Esperar a que le toque, al ritmo de la velocidad y respetando la pausa. Si se está
+                // saltando, no se espera hasta llegar al tiempo pedido.
+                boolean flushed = false;
+                while (this.running && !this.restartRequested) {
+                    int seek = this.seekTarget;
+                    if (seek >= 0) {
+                        if (seek < this.position) {
+                            this.restartRequested = true; // hacia atrás: empezar de cero y avanzar rápido
+                            break packets;
                         }
-                        lastNanos = now;
-                        if (time > clock) {
-                            Thread.sleep(this.paused ? 50 : (long) Math.min(50, Math.max(1, (time - clock) / this.speed)));
+                        if (time <= seek) {
+                            break; // todavía no ha llegado: mandarlo ya
                         }
+                        finishSeek(seek);
+                        clock = seek;
+                        lastNanos = System.nanoTime();
                     }
-                    if (!this.running || this.restartRequested) {
+                    long now = System.nanoTime();
+                    if (!this.paused) {
+                        clock += (now - lastNanos) / 1_000_000.0 * this.speed;
+                    }
+                    lastNanos = now;
+                    if (time <= clock) {
                         break;
                     }
+                    if (!flushed) {
+                        flush();
+                        flushed = true;
+                    }
+                    refreshHudIfDue();
+                    Thread.sleep(this.paused ? 50 : (long) Math.min(50, Math.max(1, (time - clock) / this.speed)));
+                }
+                if (!this.running || this.restartRequested) {
+                    break;
                 }
                 sendRecorded(data);
                 this.position = time;
                 if (index == 2) {
                     afterLogin();
                 }
-                if (time - lastBossbar >= 1000) {
-                    lastBossbar = time;
-                    updateBossbar();
+                if (this.seekTarget < 0) {
+                    announceHighlights(time);
                 }
+                refreshHudIfDue();
                 waitWritable();
             }
         }
         flush();
+        if (this.running && !this.restartRequested && this.seekTarget >= 0) {
+            finishSeek(this.duration); // se ha pedido un tiempo más allá del final
+        }
         if (this.running && !this.restartRequested) {
             this.position = this.duration;
+            announceHighlights(this.duration);
             updateBossbar();
             message(Component.literal("Fin del replay. /replay reiniciar para verlo otra vez o /replay salir para volver.")
                     .withStyle(ChatFormatting.GREEN));
@@ -431,8 +516,101 @@ public final class ReplayViewer {
         @SuppressWarnings({"unchecked", "rawtypes"})
         RootCommandNode<net.minecraft.commands.SharedSuggestionProvider> root = (RootCommandNode) this.commands.getRoot();
         send(new ClientboundCommandsPacket(root));
-        message(Component.literal("Viendo " + this.name + ". Comandos: /replay pausa, /replay velocidad <x>, "
-                + "/replay reiniciar, /replay salir.").withStyle(ChatFormatting.GRAY));
+        if (!this.helpShown) {
+            this.helpShown = true;
+            message(Component.literal("Viendo " + this.name + ". Pulsa J (o /replay menu) para abrir el menú del replay. "
+                    + "Comandos: " + HELP).withStyle(ChatFormatting.GRAY));
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Saltos en el tiempo
+
+    /**
+     * Pide saltar a {@code target} ms. Hacia delante se mandan los paquetes que faltan sin esperar;
+     * hacia atrás se empieza el replay de cero y se avanza igual (como en Hypixel: el estado final es
+     * el mismo que si se hubiera visto entero).
+     *
+     * @param camera     dónde poner la cámara al llegar (un highlight), o {@code null}
+     * @param keepCamera si el replay vuelve a empezar, devolver la cámara a donde estaba
+     */
+    private void seek(int target, Highlight camera, boolean keepCamera) {
+        if (camera != null) {
+            unfollow(false); // el highlight trae su propia cámara
+        }
+        this.seekCamera = camera;
+        this.seekKeepCamera = keepCamera;
+        this.seekTarget = Math.max(this.terrainReady, Math.min(target, this.duration));
+        if (this.thread != null && !this.thread.isAlive()) {
+            // Ya había terminado: arrancar otra vez (empieza de cero y avanza rápido).
+            this.restartRequested = false;
+            this.running = true;
+            this.thread = new Thread(this::run, "wwrp2-visor-" + this.player.getGameProfile().getName());
+            this.thread.setDaemon(true);
+            this.thread.start();
+        }
+        updateBossbar();
+    }
+
+    /** Se ha llegado al tiempo pedido: colocar la cámara y seguir a ritmo normal. */
+    private void finishSeek(int target) {
+        Highlight camera = this.seekCamera;
+        this.seekCamera = null;
+        this.seekTarget = -1;
+        if (camera != null) {
+            teleport(camera.x(), camera.y(), camera.z(), camera.yaw(), camera.pitch());
+        } else if (this.seekRestarted && this.seekKeepCamera && this.hasClientPos) {
+            teleport(this.clientX, this.clientY, this.clientZ, this.clientYaw, this.clientPitch);
+        }
+        this.seekRestarted = false;
+        // Los highlights de antes del salto no se anuncian; el del tiempo exacto sí.
+        int from = camera != null ? Math.min(camera.time(), target) : target;
+        int next = 0;
+        while (next < this.highlights.size() && this.highlights.get(next).time() < from) {
+            next++;
+        }
+        this.nextHighlight = next;
+        this.position = Math.max(this.position, target);
+        message(Component.literal("Saltado a " + time(target) + ".").withStyle(ChatFormatting.GRAY));
+        updateBossbar();
+    }
+
+    private void teleport(double x, double y, double z, float yaw, float pitch) {
+        send(new ClientboundPlayerPositionPacket(x, y, z, yaw, pitch, Set.of(), 0));
+        flush();
+    }
+
+    /** "1:23", "83" o "83.5" (segundos) a milisegundos. */
+    static int parseTime(String text) throws CommandSyntaxException {
+        try {
+            String[] parts = text.trim().split(":");
+            double seconds = 0;
+            for (String part : parts) {
+                seconds = seconds * 60 + Double.parseDouble(part);
+            }
+            if (parts.length > 3 || seconds < 0 || Double.isNaN(seconds)) {
+                throw new NumberFormatException();
+            }
+            return (int) Math.round(seconds * 1000);
+        } catch (NumberFormatException e) {
+            throw new SimpleCommandExceptionType(Component.literal("Tiempo no válido: usa m:ss o segundos (p. ej. 1:23 o 83)."))
+                    .create();
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Menú del cliente (pantalla propia del mod)
+
+    /** Manda al cliente el estado del replay para el menú. */
+    private void sendState(boolean open) {
+        List<ReplayStatePacket.Entry> entries = new ArrayList<>(this.highlights.size());
+        for (Highlight h : this.highlights) {
+            entries.add(new ReplayStatePacket.Entry(h.time(), h.type(), h.name()));
+        }
+        ReplayStatePacket state = new ReplayStatePacket(true, open, this.name, this.duration, this.position,
+                this.paused, this.speed, this.seekTarget >= 0, entries, trackedNames(),
+                this.followName == null ? "" : this.followName);
+        send(ReplayNetwork.CHANNEL.toVanillaPacket(state, NetworkDirection.PLAY_TO_CLIENT));
     }
 
     /** Manda un paquete grabado. Casi todos van tal cual; los que llevan el UUID del espectador se cambian. */
@@ -451,6 +629,9 @@ public final class ReplayViewer {
                 }
                 if (packet.actions().contains(ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER)) {
                     this.replayPlayers.add(entries.get(i).profileId());
+                    if (e.profile() != null) {
+                        this.replayNames.put(e.profileId(), e.profile().getName());
+                    }
                 }
             }
             send(packet);
@@ -464,31 +645,299 @@ public final class ReplayViewer {
             send(new ClientboundPlayerInfoRemovePacket(ids));
         } else if (id == ID_ADD_PLAYER) {
             ClientboundAddPlayerPacket packet = new ClientboundAddPlayerPacket(buf);
+            String playerName = this.replayNames.getOrDefault(packet.getPlayerId(), packet.getPlayerId().toString());
+            this.tracked.put(packet.getEntityId(), new Tracked(playerName, packet.getX(), packet.getY(), packet.getZ(),
+                    packet.getyRot() * 360f / 256f));
             if (packet.getPlayerId().equals(self)) {
                 send(addPlayerPacket(packet.getEntityId(), VIEWER_UUID, packet.getX(), packet.getY(), packet.getZ(),
                         packet.getyRot(), packet.getxRot()));
             } else {
                 writeRaw(Unpooled.wrappedBuffer(data));
             }
+            if (this.followId < 0 && playerName.equalsIgnoreCase(this.followName)) {
+                this.followId = packet.getEntityId(); // ha vuelto a aparecer (reaparecer, salto atrás...)
+                send(setCameraPacket(packet.getEntityId()));
+            }
         } else {
+            trackMovement(id, buf);
             writeRaw(Unpooled.wrappedBuffer(data));
         }
     }
 
+    /** Sigue la posición de los jugadores del replay (para {@code /replay jugador}). */
+    private void trackMovement(int id, FriendlyByteBuf buf) {
+        if (this.tracked.isEmpty()) {
+            return;
+        }
+        if (id == ID_REMOVE_ENTITIES) {
+            int count = buf.readVarInt();
+            for (int i = 0; i < count; i++) {
+                int entityId = buf.readVarInt();
+                Tracked removed = this.tracked.remove(entityId);
+                if (removed != null && entityId == this.followId) {
+                    // Muere o sale de la zona: la cámara se queda donde estaba y se le vuelve a seguir si reaparece.
+                    this.followId = -1;
+                    send(setCameraPacket(ZoneRecorder.CAMERA_ID));
+                    teleport(removed.x, removed.y + EYE_HEIGHT, removed.z, removed.yaw, 0f);
+                    message(Component.literal(removed.name + " ha desaparecido; se le vuelve a seguir si reaparece.")
+                            .withStyle(ChatFormatting.GRAY));
+                }
+            }
+            return;
+        }
+        if (id != ID_MOVE_POS && id != ID_MOVE_POS_ROT && id != ID_MOVE_ROT && id != ID_TELEPORT_ENTITY) {
+            return;
+        }
+        Tracked t = this.tracked.get(buf.readVarInt());
+        if (t == null) {
+            return;
+        }
+        if (id == ID_TELEPORT_ENTITY) {
+            t.x = buf.readDouble();
+            t.y = buf.readDouble();
+            t.z = buf.readDouble();
+            t.yaw = buf.readByte() * 360f / 256f;
+            return;
+        }
+        if (id != ID_MOVE_ROT) {
+            t.x += buf.readShort() / 4096.0;
+            t.y += buf.readShort() / 4096.0;
+            t.z += buf.readShort() / 4096.0;
+        }
+        if (id != ID_MOVE_POS) {
+            t.yaw = buf.readByte() * 360f / 256f;
+        }
+    }
+
+    /** Un jugador del replay y su última posición conocida. */
+    private static final class Tracked {
+        final String name;
+        volatile double x, y, z;
+        volatile float yaw;
+
+        Tracked(String name, double x, double y, double z, float yaw) {
+            this.name = name;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.yaw = yaw;
+        }
+    }
+
+    /** Nombres de los jugadores que están ahora en el replay, en orden alfabético. */
+    private List<String> trackedNames() {
+        List<String> names = new ArrayList<>();
+        for (Tracked t : this.tracked.values()) {
+            names.add(t.name);
+        }
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        return names;
+    }
+
+    /** Pone la cámara detrás del jugador, un poco por encima, mirándolo (como los marcadores de kill). */
+    private int goToPlayer(String name) {
+        unfollow(false);
+        for (Tracked t : this.tracked.values()) {
+            if (t.name.equalsIgnoreCase(name)) {
+                double yawRad = Math.toRadians(t.yaw);
+                double back = 4;
+                double up = 2;
+                teleport(t.x + Math.sin(yawRad) * back, t.y + up, t.z - Math.cos(yawRad) * back, t.yaw,
+                        (float) Math.toDegrees(Math.atan2(up - 1.0, back)));
+                return 1;
+            }
+        }
+        message(Component.literal(name + " no está ahora en el replay.").withStyle(ChatFormatting.RED));
+        return 0;
+    }
+
+    /** Ver el replay desde los ojos del jugador y seguirlo (cámara de espectador de Minecraft). */
+    private int follow(String name) {
+        for (Map.Entry<Integer, Tracked> entry : this.tracked.entrySet()) {
+            if (entry.getValue().name.equalsIgnoreCase(name)) {
+                this.followName = entry.getValue().name;
+                this.followId = entry.getKey();
+                send(setCameraPacket(entry.getKey()));
+                message(Component.literal("Siguiendo a " + this.followName + ". Agáchate (shift) o /replay dejar para soltarlo.")
+                        .withStyle(ChatFormatting.GRAY));
+                updateBossbar();
+                return 1;
+            }
+        }
+        message(Component.literal(name + " no está ahora en el replay.").withStyle(ChatFormatting.RED));
+        return 0;
+    }
+
+    /**
+     * Deja de seguir. Con {@code placeCamera}, la cámara libre se queda en los ojos del jugador al que
+     * seguía, para que no salte de golpe a otro sitio.
+     */
+    private void unfollow(boolean placeCamera) {
+        if (this.followName == null) {
+            return;
+        }
+        Tracked t = this.followId >= 0 ? this.tracked.get(this.followId) : null;
+        this.followName = null;
+        this.followId = -1;
+        send(setCameraPacket(ZoneRecorder.CAMERA_ID));
+        if (placeCamera && t != null) {
+            teleport(t.x, t.y + EYE_HEIGHT, t.z, t.yaw, 0f);
+        }
+        flush();
+        updateBossbar();
+    }
+
+    private static ClientboundSetCameraPacket setCameraPacket(int entityId) {
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            buf.writeVarInt(entityId);
+            return new ClientboundSetCameraPacket(buf);
+        } finally {
+            buf.release();
+        }
+    }
+
+    /** Lista en el chat los jugadores del replay; clic en uno para ir con la cámara. */
+    private void listPlayers() {
+        List<String> names = trackedNames();
+        if (names.isEmpty()) {
+            message(Component.literal("Ahora mismo no hay jugadores en el replay.").withStyle(ChatFormatting.GRAY));
+            return;
+        }
+        MutableComponent line = Component.literal("Jugadores (clic para ir): ").withStyle(ChatFormatting.GRAY);
+        for (String name : names) {
+            String command = "/replay jugador " + name;
+            line.append(Component.literal(name).withStyle(style -> style.withColor(ChatFormatting.AQUA)
+                    .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(command)))));
+            line.append(Component.literal("  "));
+        }
+        message(line);
+    }
+
+    /** Refresca la barra y la info cada medio segundo de tiempo real (también en pausa). */
+    private void refreshHudIfDue() {
+        long now = System.nanoTime();
+        if (now - this.lastHudNanos >= 500_000_000L) {
+            this.lastHudNanos = now;
+            updateBossbar();
+        }
+    }
+
+    /**
+     * La barra de arriba: el título es una línea de tiempo de {@link #TIMELINE_SLOTS} rayas del mismo
+     * ancho que la barra, con los marcadores en su color; la barra de debajo marca por dónde va.
+     * El nombre, el tiempo y la velocidad van en la barra de acción (encima de la hotbar).
+     */
     private void updateBossbar() {
-        MutableComponent title = Component.literal(this.name + " ").withStyle(ChatFormatting.GREEN)
-                .append(Component.literal(time(this.position) + " / " + time(this.duration)).withStyle(ChatFormatting.YELLOW));
-        if (this.speed != 1f) {
-            title.append(Component.literal(" x" + this.speed).withStyle(ChatFormatting.AQUA));
+        int position = this.position;
+        int played = (int) ((long) position * TIMELINE_SLOTS / this.duration);
+        MarkerType[] slots = new MarkerType[TIMELINE_SLOTS];
+        for (Highlight h : this.highlights) {
+            int slot = Math.min(TIMELINE_SLOTS - 1, (int) ((long) h.time() * TIMELINE_SLOTS / this.duration));
+            if (slots[slot] == null || priority(h.type()) > priority(slots[slot])) {
+                slots[slot] = h.type(); // si coinciden varios en la misma raya, gana el más importante
+            }
         }
-        if (this.paused) {
-            title.append(Component.literal(" (pausa)").withStyle(ChatFormatting.GOLD));
+        MutableComponent timeline = Component.empty();
+        StringBuilder run = new StringBuilder();
+        ChatFormatting runColor = null;
+        for (int i = 0; i < TIMELINE_SLOTS; i++) {
+            ChatFormatting color = slots[i] != null ? slots[i].color()
+                    : i < played ? ChatFormatting.GRAY : ChatFormatting.DARK_GRAY;
+            if (color != runColor && run.length() > 0) {
+                timeline.append(Component.literal(run.toString()).withStyle(runColor));
+                run.setLength(0);
+            }
+            runColor = color;
+            run.append('|');
         }
-        this.bossbar.setName(title);
-        this.bossbar.setProgress(Math.min(1f, (float) this.position / this.duration));
+        timeline.append(Component.literal(run.toString()).withStyle(runColor));
+        this.bossbar.setName(timeline);
+        this.bossbar.setProgress(Math.min(1f, (float) position / this.duration));
         send(ClientboundBossEventPacket.createUpdateNamePacket(this.bossbar));
         send(ClientboundBossEventPacket.createUpdateProgressPacket(this.bossbar));
+
+        MutableComponent info = Component.literal(this.name + "  ").withStyle(ChatFormatting.GREEN)
+                .append(Component.literal(time(position) + " / " + time(this.duration)).withStyle(ChatFormatting.YELLOW));
+        if (this.speed != 1f) {
+            info.append(Component.literal("  x" + this.speed).withStyle(ChatFormatting.AQUA));
+        }
+        if (this.paused) {
+            info.append(Component.literal("  (pausa)").withStyle(ChatFormatting.GOLD));
+        }
+        String following = this.followName;
+        if (following != null) {
+            info.append(Component.literal("  POV " + following + " (shift: soltar)").withStyle(ChatFormatting.AQUA));
+        }
+        int seek = this.seekTarget;
+        if (seek >= 0) {
+            info.append(Component.literal("  saltando a " + time(seek) + "...").withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
+        send(new ClientboundSetActionBarTextPacket(info));
+        sendState(false);
         flush();
+    }
+
+    /** Qué color se ve si varios marcadores caen en la misma raya: kill > PvE > manual > fase. */
+    private static int priority(MarkerType type) {
+        return switch (type) {
+            case KILL -> 3;
+            case PVE -> 2;
+            case MANUAL -> 1;
+            case FASE -> 0;
+        };
+    }
+
+    /** Escribe en el chat los marcadores por los que acaba de pasar la reproducción. */
+    private void announceHighlights(int time) {
+        while (this.nextHighlight < this.highlights.size() && this.highlights.get(this.nextHighlight).time() <= time) {
+            Highlight h = this.highlights.get(this.nextHighlight++);
+            message(Component.literal("[" + time(h.time()) + "] ").withStyle(ChatFormatting.GRAY)
+                    .append(Component.literal(h.name()).withStyle(h.type().color())));
+        }
+    }
+
+    /** Lee el {@code markers.json} del replay (si no hay, sin marcadores). */
+    private static List<Highlight> readHighlights(ZipFile zip) throws IOException {
+        ZipEntry entry = zip.getEntry("markers.json");
+        List<Highlight> list = new ArrayList<>();
+        if (entry == null) {
+            return list;
+        }
+        try (InputStreamReader reader = new InputStreamReader(zip.getInputStream(entry), StandardCharsets.UTF_8)) {
+            for (JsonElement element : new Gson().fromJson(reader, JsonArray.class)) {
+                JsonObject marker = element.getAsJsonObject();
+                JsonObject value = marker.getAsJsonObject("value");
+                MarkerType type = MarkerType.MANUAL;
+                if (value.has("wwrp2_tipo")) {
+                    try {
+                        type = MarkerType.valueOf(value.get("wwrp2_tipo").getAsString());
+                    } catch (IllegalArgumentException ignored) {
+                        // tipo desconocido: se queda como manual
+                    }
+                }
+                String name = value.has("name") ? value.get("name").getAsString() : "";
+                if (name.length() >= 2 && name.charAt(0) == ChatFormatting.PREFIX_CODE) {
+                    name = name.substring(2); // quitar el código de color del principio
+                }
+                JsonObject pos = value.has("position") ? value.getAsJsonObject("position") : new JsonObject();
+                list.add(new Highlight(marker.get("realTimestamp").getAsInt(), type, name,
+                        number(pos, "x"), number(pos, "y"), number(pos, "z"),
+                        (float) number(pos, "yaw"), (float) number(pos, "pitch")));
+            }
+        }
+        list.sort(Comparator.comparingInt(Highlight::time));
+        return list;
+    }
+
+    private static double number(JsonObject object, String key) {
+        return object.has(key) ? object.get(key).getAsDouble() : 0;
+    }
+
+    /** Un marcador del replay, con la cámara que encuadra lo que pasa. */
+    private record Highlight(int time, MarkerType type, String name, double x, double y, double z,
+                             float yaw, float pitch) {
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -498,6 +947,11 @@ public final class ReplayViewer {
         this.commands.register(LiteralArgumentBuilder.<ReplayViewer>literal("replay")
                 .then(LiteralArgumentBuilder.<ReplayViewer>literal("salir").executes(c -> {
                     this.server.execute(this::stop);
+                    return 1;
+                }))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("menu").executes(c -> {
+                    sendState(true);
+                    flush();
                     return 1;
                 }))
                 .then(LiteralArgumentBuilder.<ReplayViewer>literal("pausa").executes(c -> {
@@ -513,25 +967,86 @@ public final class ReplayViewer {
                                     return 1;
                                 })))
                 .then(LiteralArgumentBuilder.<ReplayViewer>literal("reiniciar").executes(c -> {
-                    this.paused = false;
-                    this.restartRequested = true;
-                    if (this.thread != null && !this.thread.isAlive()) {
-                        // Ya había terminado: arrancar otra vez.
-                        this.running = true;
-                        this.thread = new Thread(this::run, "wwrp2-visor-" + this.player.getGameProfile().getName());
-                        this.thread.setDaemon(true);
-                        this.thread.start();
-                    }
+                    seek(0, null, false);
                     return 1;
-                })));
+                }))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("ir")
+                        .then(RequiredArgumentBuilder.<ReplayViewer, String>argument("tiempo", StringArgumentType.greedyString())
+                                .executes(c -> {
+                                    seek(parseTime(StringArgumentType.getString(c, "tiempo")), null, true);
+                                    return 1;
+                                })))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("atras")
+                        .executes(c -> jump(-10))
+                        .then(RequiredArgumentBuilder.<ReplayViewer, Integer>argument("segundos", IntegerArgumentType.integer(1, 3600))
+                                .executes(c -> jump(-IntegerArgumentType.getInteger(c, "segundos")))))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("adelante")
+                        .executes(c -> jump(10))
+                        .then(RequiredArgumentBuilder.<ReplayViewer, Integer>argument("segundos", IntegerArgumentType.integer(1, 3600))
+                                .executes(c -> jump(IntegerArgumentType.getInteger(c, "segundos")))))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("jugadores").executes(c -> {
+                    listPlayers();
+                    return 1;
+                }))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("jugador")
+                        .then(RequiredArgumentBuilder.<ReplayViewer, String>argument("nombre", StringArgumentType.word())
+                                .executes(c -> goToPlayer(StringArgumentType.getString(c, "nombre")))))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("seguir")
+                        .then(RequiredArgumentBuilder.<ReplayViewer, String>argument("nombre", StringArgumentType.word())
+                                .executes(c -> follow(StringArgumentType.getString(c, "nombre")))))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("dejar").executes(c -> {
+                    unfollow(true);
+                    return 1;
+                }))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("highlights").executes(c -> {
+                    listHighlights();
+                    return 1;
+                }))
+                .then(LiteralArgumentBuilder.<ReplayViewer>literal("highlight")
+                        .then(RequiredArgumentBuilder.<ReplayViewer, Integer>argument("n", IntegerArgumentType.integer(1))
+                                .executes(c -> {
+                                    int n = IntegerArgumentType.getInteger(c, "n");
+                                    if (n > this.highlights.size()) {
+                                        message(Component.literal("Este replay tiene " + this.highlights.size()
+                                                + " highlights.").withStyle(ChatFormatting.RED));
+                                        return 0;
+                                    }
+                                    Highlight h = this.highlights.get(n - 1);
+                                    seek(h.time(), h, false);
+                                    return 1;
+                                }))));
+    }
+
+    /** Avanza o retrocede unos segundos desde donde va (o desde donde iba a llegar un salto en curso). */
+    private int jump(int seconds) {
+        int from = this.seekTarget >= 0 ? this.seekTarget : this.position;
+        seek(from + seconds * 1000, null, true);
+        return 1;
+    }
+
+    /** Lista los highlights en el chat; al hacer clic en uno se salta a él. */
+    private void listHighlights() {
+        if (this.highlights.isEmpty()) {
+            message(Component.literal("Este replay no tiene highlights.").withStyle(ChatFormatting.GRAY));
+            return;
+        }
+        message(Component.literal("Highlights (clic para ir):").withStyle(ChatFormatting.GRAY));
+        for (int i = 0; i < this.highlights.size(); i++) {
+            Highlight h = this.highlights.get(i);
+            String command = "/replay highlight " + (i + 1);
+            message(Component.literal((i + 1) + ". [" + time(h.time()) + "] ").withStyle(ChatFormatting.GRAY)
+                    .append(Component.literal(h.name()).withStyle(h.type().color()))
+                    .withStyle(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(command)))));
+        }
     }
 
     private void runCommand(String command) {
         try {
             this.commands.execute(command, this);
         } catch (CommandSyntaxException e) {
-            message(Component.literal("Mientras ves un replay solo funcionan: /replay pausa, /replay velocidad <"
-                    + MIN_SPEED + "-" + MAX_SPEED + ">, /replay reiniciar y /replay salir.").withStyle(ChatFormatting.RED));
+            message(Component.literal(e.getRawMessage().getString() + " Mientras ves un replay solo funcionan: " + HELP)
+                    .withStyle(ChatFormatting.RED));
         }
     }
 
@@ -598,6 +1113,22 @@ public final class ReplayViewer {
         }
     }
 
+    private static ClientboundTeleportEntityPacket teleportEntityPacket() {
+        FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            buf.writeVarInt(0);
+            buf.writeDouble(0);
+            buf.writeDouble(0);
+            buf.writeDouble(0);
+            buf.writeByte(0);
+            buf.writeByte(0);
+            buf.writeBoolean(false);
+            return new ClientboundTeleportEntityPacket(buf);
+        } finally {
+            buf.release();
+        }
+    }
+
     static String time(int millis) {
         int seconds = millis / 1000;
         return seconds / 60 + ":" + String.format("%02d", seconds % 60);
@@ -618,6 +1149,22 @@ public final class ReplayViewer {
                     super.channelRead(ctx, msg);
                 } else {
                     payload.getData().release();
+                }
+            } else if (msg instanceof ServerboundPlayerCommandPacket command
+                    && command.getAction() == ServerboundPlayerCommandPacket.Action.PRESS_SHIFT_KEY) {
+                if (followName != null) {
+                    server.execute(() -> unfollow(true));
+                }
+            } else if (msg instanceof ServerboundMovePlayerPacket move) {
+                if (move.hasPosition()) {
+                    clientX = move.getX(0);
+                    clientY = move.getY(0);
+                    clientZ = move.getZ(0);
+                    hasClientPos = true;
+                }
+                if (move.hasRotation()) {
+                    clientYaw = move.getYRot(0);
+                    clientPitch = move.getXRot(0);
                 }
             } else if (msg instanceof ServerboundChatCommandPacket command) {
                 server.execute(() -> runCommand(command.command()));

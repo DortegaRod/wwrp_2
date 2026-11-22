@@ -67,7 +67,7 @@ Ver [`PLAN.md`](PLAN.md): fase 0 grabador base, 1 grabador de zona, 2 rondas, 3 
 | `/replay zona <x1 z1> <x2 z2>` | Define la zona (dos esquinas, máximo 64 chunks por lado) |
 | `/replay start` / `/replay stop` | Graba la zona / para y guarda en `replays/zona_<fecha>.mcpr` |
 | `/replay estado` | Qué se está grabando: tiempo, % de terreno, entidades, tamaño |
-| `/replay ver <archivo>` | Ver un replay dentro del servidor (solo fuera de ronda). Dentro: `/replay pausa`, `velocidad <x>`, `reiniciar`, `salir` |
+| `/replay ver <archivo>` | Ver un replay dentro del servidor (solo fuera de ronda). Dentro: tecla **J** o `/replay menu` (menú gráfico), `/replay pausa`, `velocidad <x>`, `ir <m:ss>`, `atras [s]`, `adelante [s]`, `highlights`, `highlight <n>`, `jugadores`, `jugador <nombre>`, `seguir <nombre>` (POV; shift para soltar), `dejar`, `reiniciar`, `salir`. Atajos con el menú abierto: espacio, R, A/D, rueda |
 | `/replay marca nueva <nombre>` | Marcador ahora, con la cámara donde mira el admin |
 | `/replay marca lista` | Marcadores de la grabación en curso, con número y minuto |
 | `/replay marca editar <n> <nombre>` / `borrar <n>` | Cambia el nombre o borra el marcador `n` (también los automáticos) |
@@ -109,9 +109,15 @@ Ver [`PLAN.md`](PLAN.md): fase 0 grabador base, 1 grabador de zona, 2 rondas, 3 
   añade, edita y borra en la grabación en curso. Kills probadas con dos clientes. Colores: verde
   fases, rojo kills, naranja PvE, azul manuales (en ReForgedPlay / Replay Mod solo se colorea el nombre).
   Detalle en [`PLAN.md`](PLAN.md).
-- [ ] **Fase 4a: visor dentro del servidor (programado el 2026-11-16, sin probar con cliente).**
+- [ ] **Fase 4a: visor dentro del servidor (probado con cliente el 2026-11-22).**
   `/replay ver <archivo>`: el admin sale del mundo real, ve el replay en vuelo libre con pausa,
-  velocidad y reiniciar, y con `/replay salir` vuelve a su sitio. Detalle en [`PLAN.md`](PLAN.md).
+  velocidad y reiniciar, y con `/replay salir` vuelve a su sitio. La barra de arriba enseña los
+  highlights en su color. Detalle en [`PLAN.md`](PLAN.md).
+- [ ] **Fases 4b y 4c: saltar en el tiempo y menú gráfico (programado el 2026-11-22, sin probar).**
+  Ir a un tiempo o a un highlight, retroceder y avanzar sin reiniciar; menú con la tecla J con la
+  línea de tiempo clicable, la lista de highlights y la de jugadores (clic: llevar la cámara a
+  uno; clic derecho: verlo en primera persona y seguirlo). Atajos: espacio, R, A/D y rueda.
+  Detalle en [`PLAN.md`](PLAN.md).
 - [ ] Multikills y rachas (abierto para el futuro). Fase 4: visor en el servidor. Fase 5: escala.
 
 ## Cómo probar

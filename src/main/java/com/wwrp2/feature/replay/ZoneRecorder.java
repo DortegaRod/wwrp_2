@@ -79,7 +79,8 @@ import java.util.UUID;
 public final class ZoneRecorder {
     private static final Logger LOGGER = LogUtils.getLogger();
     /** ID de entidad de la cámara en el replay; muy alto para que no choque con entidades reales. */
-    private static final int CAMERA_ID = Integer.MAX_VALUE - 1;
+    /** Id de entidad de la cámara (el jugador del cliente) dentro del replay; el visor también lo usa. */
+    static final int CAMERA_ID = Integer.MAX_VALUE - 1;
     private static final GameProfile CAMERA = new GameProfile(
             UUID.nameUUIDFromBytes("wwrp2:replay-camara".getBytes()), "Camara");
     /** Distancia de chunks que se anuncia al cliente del replay (el máximo de Minecraft). */
@@ -336,6 +337,7 @@ public final class ZoneRecorder {
         }
         if (this.pendingTerrain.isEmpty()) {
             this.terrainDone = true;
+            this.recorder.markTerrainReady();
             LOGGER.info("Replay de zona: terreno inicial grabado ({} chunks)", this.totalChunks);
         }
     }
